@@ -9,6 +9,7 @@ module.exports = (function () {
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
     var FEE_RATE = 0.005
     var FEE_LEAST = 0.05
+    var AUTHOR = 'n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J';
     
     var BlocksContract = function () {
         LocalContractStorage.defineProperties(this, {
@@ -20,7 +21,7 @@ module.exports = (function () {
         LocalContractStorage.defineMapProperties(this, {
             owners: null,
             ownerIds: null,
-            balance: {
+            balances: {
                 stringify: function (obj) {
                     return obj.toString();
                 },
@@ -35,15 +36,25 @@ module.exports = (function () {
         init: function () {
             this.nextOwnerId = 0;
             this.author = Blockchain.transaction.from;
-            var ownerId = this._addOwner(this.author).id;
+            var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
             this._configure(this.author, IMG, HREF, HINT);
-            this.blocks = Array(TOTAL_BLOCKS).fill(ownerId);
+            this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
+            owner.assets = TOTAL_BLOCKS;
+            var v = new BigNumber(0.1);
         },
     
         get: function () {
+            console.log('owners=', this.owners);
+            var owners = {};
+            var _this = this;
+            this.blocks.forEach(function(ownerId){
+                if (!(ownerId in owners)) {
+                    owners[ownerId] = _this._getOwnerById(ownerId);
+                }
+            })
             return {
                 blocks: this.blocks,
-                owners: this.owners.filter(function(owner){ return owner.assets })
+                owners: owners
             }
         },
     
@@ -58,10 +69,10 @@ module.exports = (function () {
             var from = Blockchain.transaction.from;
             var owner = this.owners.get(from);
             if (!(owner && owner.assets)) {
-                throw new Exception('nothing to sell.');
+                throw new Error('nothing to sell.');
             }
     
-            _checkOwnership(owner.id, rect);
+            this._checkOwnership(owner.id, rect);
     
             owner.selling = {
                 price: price,
@@ -80,50 +91,49 @@ module.exports = (function () {
         buy: function (seller, rect) {
             var owner = this.owners.get(seller)
             if (!(owner && owner.selling)) {
-                throw new Exception(seller + ' is not selling anything.');
+                throw new Error(seller + ' is not selling anything.');
             }
     
             var blockCount = this._blockCount(rect); 
             var limit = owner.selling.limit;
             if (blockCount < limit[0] || blockCount > limit[1]) {
-                throw new Exception('blockCount is not in range [' + limit[0] + ', ' + limit[1] + ']');
+                throw new Error('blockCount is not in range [' + limit[0] + ', ' + limit[1] + ']');
             }
     
             var buyer = Blockchain.transaction.from;
             if (owner.selling.to && buyer !== owner.selling.to) {
-                throw new Exception('this is private trade');
+                throw new Error('this is private trade');
             }
     
-            var buyerBalance = Blockchain.transaction.value.plus(this.balance.get(buyer));
-            var totalPrice = BigNumber(owner.selling.price).multipliedBy(blockCount);
-            var fee = totalPrice.mutipliedBy(FEE);
-            if (fee.lt(LEAST_FEE)) {
-                fee = BigNumber(LEAST_FEE);
+            var buyerBalance = Blockchain.transaction.value.plus(this.balances.get(buyer) || 0);
+            var totalPrice = (new BigNumber(owner.selling.price)).mul(blockCount);
+            var fee = totalPrice.mul(FEE_RATE);
+            if (fee.lt(FEE_LEAST)) {
+                fee = new BigNumber(FEE_LEAST);
             }
             var totalPay = totalPrice.plus(fee);
             if (buyerBalance.lt(totalPay)) {
-                throw new Exception('not enough money');
+                throw new Error('not enough money');
             }
     
-            this.balance.set(buyer, buyerBalance.minus(totalPay));
+            this.balances.set(buyer, buyerBalance.minus(totalPay));
     
-            var sellerBalance = this.balance.get(seller);
-            this.balance.set(seller, sellerBalance.plus(totalPrice));
+            var sellerBalance = this.balances.get(seller) || new BigNumber(0);
+            this.balances.set(seller, sellerBalance.plus(totalPrice));
     
-            var authorBalance = this.balance.get(this.author);
-            this.balance.set(this.author, authorBalance.plus(fee));
+            var authorBalance = this.balances.get(this.author) || new BigNumber(0);
+            this.balances.set(this.author, authorBalance.plus(fee));
     
             this._transfer(seller, buyer, rect);
         },
-    
+
         /**
          * deposit
-         * amount: amount of money
          */
         deposit: function() {
             var from = Blockchain.transaction.from;
             var balance = this._balance(from).plus(Blockchain.transaction.value);
-            this.balance.set(from, balance);
+            this.balances.set(from, balance);
         },
     
         /**
@@ -132,10 +142,10 @@ module.exports = (function () {
          */
         withdraw: function(value) {
             var from = Blockchain.transaction.from;
-            var amount = BigNumber(value);
+            var amount = new BigNumber(value);
             var balance = this._balance(from);
             if (amount.lt(0) || amount.gt(balance)) {
-                throw new Exception("Insufficient balance");
+                throw new Error("Insufficient balance");
             }
             var result = Blockchain.transfer(from, amount);
             if (!result) {
@@ -148,15 +158,19 @@ module.exports = (function () {
                     value: amount.toString()
                 }
             });
-            this.balance.set(from, balance.sub(amount));
+            this.balances.set(from, balance.sub(amount));
         },
     
-        configure: function(account, img, href, hint) {
+        configure: function(img, href, hint) {
             this._configure(Blockchain.transaction.from, img, href, hint);
+        },
+
+        balance: function() {
+            return this._balance(Blockchain.transaction.from);
         },
     
         _balance: function(account) {
-            return this.balance.get(account) || BigNumber(0);
+            return this.balances.get(account) || new BigNumber(0);
         },
     
         _blockCount: function(rect) {
@@ -168,7 +182,7 @@ module.exports = (function () {
                 for (var x = rect[3]; x <= rect[1]; x++) { // left to right
                     var i = y * WIDTH + x;
                     if (this.blocks[i] !== ownerId) {
-                        throw new Exception('block (' + x + ', ' + y + ') is not owned by the specified account.');
+                        throw new Error('block (' + x + ', ' + y + ') is not owned by the specified account.');
                     }
                 }
             }
@@ -178,9 +192,10 @@ module.exports = (function () {
             return this.owners.get(this.ownerIds.get(ownerId));
         },
     
-        _addOwner: function (account) {
-            var ownerId = this.nextOwnerId++
-            var owner = {id: ownerId, assets: 0}
+        _addOwner: function (account, data) {
+            var ownerId = this.nextOwnerId++;
+            var owner = data || {assets: 0};
+            owner.id = ownerId;
             this.ownerIds.set(ownerId, account);
             this.owners.set(account, owner);
             return owner;
@@ -189,7 +204,7 @@ module.exports = (function () {
         _configure: function(account, img, href, hint) {
             var owner = this.owners.get(account);
             if (!owner) {
-                throw new Exception(account + ' is not an owner');
+                throw new Error(account + ' is not an owner');
             }
     
             owner.img = img;
@@ -204,14 +219,14 @@ module.exports = (function () {
             var fromOwner = this.owners.get(from);
             var toOwner = this.owners.get(to);
             if (!toOwner) {
-                toOwner = _addOwner(to);
+                toOwner = this._addOwner(to);
             }
     
             for (var y = rect[0]; y <= rect[2]; y++) { // top to bottom
                 for (var x = rect[3]; x <= rect[1]; x++) { // left to right
                     var i = y * WIDTH + x;
                     if (blocks[i] !== fromOwner.id) {
-                        throw new Exception('block (' + x + ', ' + y + ') is not owned by ' + from);
+                        throw new Error('block (' + x + ', ' + y + ') is not owned by ' + from);
                     }
                     blocks[i] = toOwner.id;
                 }
