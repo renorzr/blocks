@@ -2,14 +2,16 @@
 
 module.exports = (function () {
     var IMG = 'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png';
+    var ZERO = 'AAA';
     var HREF = 'https://www.google.com/';
     var HINT = 'for sale';
     var WIDTH = 100;
     var HEIGHT = 100;
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
-    var FEE_RATE = 0.005
-    var FEE_LEAST = 0.05
-    var AUTHOR = 'n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J';
+    var FEE_RATE = 0.005;
+    var FEE_LEAST = 0.05;
+    var CHAR_CODE_OF_A = 65;
+    var BASE = 26;
     
     var BlocksContract = function () {
         LocalContractStorage.defineProperties(this, {
@@ -37,10 +39,9 @@ module.exports = (function () {
             this.nextOwnerId = 0;
             this.author = Blockchain.transaction.from;
             var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
-            this._configure(this.author, IMG, HREF, HINT);
+            this._configure(this.author, IMG, ZERO, HREF, HINT);
             this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
             owner.assets = TOTAL_BLOCKS;
-            var v = new BigNumber(0.1);
         },
     
         get: function () {
@@ -53,30 +54,30 @@ module.exports = (function () {
                 }
             })
             return {
-                blocks: this.blocks,
-                owners: owners
+                owners: owners,
+                blocks: this.blocks
             }
         },
     
         /**
          * sell
          * price: price per block
-         * rect: rect to sell, format: [top, right, bottom, left]
+         * blocks: blocks to sell
          * limit: limit of blockCount of blocks for 1 trade. format: [min, max]
          * to: only sell to specified account, null for no limit
          */
-        sell: function (price, rect, limit, to) {
+        sell: function (price, blocks, limit, to) {
             var from = Blockchain.transaction.from;
             var owner = this.owners.get(from);
             if (!(owner && owner.assets)) {
                 throw new Error('nothing to sell.');
             }
     
-            this._checkOwnership(owner.id, rect);
+            this._checkOwnership(owner.id, this._parseBlocks(blocks));
     
             owner.selling = {
                 price: price,
-                rect: rect,
+                blocks: blocks,
                 limit: limit,
                 to: to
             }
@@ -86,15 +87,17 @@ module.exports = (function () {
         /**
          * buy from a specified seller
          * seller: seller account
-         * rect: rect to buy, format: [top, right, bottom, left]
+         * blocks: blocks to buy
          */
-        buy: function (seller, rect) {
-            var owner = this.owners.get(seller)
+        buy: function (sellerId, blocks) {
+            var seller = this.ownerIds.get(sellerId);
+            var owner = this.owners.get(seller);
             if (!(owner && owner.selling)) {
-                throw new Error(seller + ' is not selling anything.');
+                throw new Error('user ' + sellerId + ' is not selling anything.');
             }
     
-            var blockCount = this._blockCount(rect); 
+            blocks = this._parseBlocks(blocks);
+            var blockCount = blocks.length;
             var limit = owner.selling.limit;
             if (blockCount < limit[0] || blockCount > limit[1]) {
                 throw new Error('blockCount is not in range [' + limit[0] + ', ' + limit[1] + ']');
@@ -124,7 +127,30 @@ module.exports = (function () {
             var authorBalance = this.balances.get(this.author) || new BigNumber(0);
             this.balances.set(this.author, authorBalance.plus(fee));
     
-            this._transfer(seller, buyer, rect);
+            this._transfer(seller, buyer, blocks);
+
+            // remove sold blocks from selling.blocks
+            var blocksForSaleStatus = {};
+            var blocksForSale = this._parseBlocks(owner.selling.blocks);
+            blocksForSale.forEach(function(blockId){
+                blocksForSaleStatus[blockId] = true;
+            });
+            blocks.forEach(function(blockId){
+                if (blocksForSaleStatus[blockId]) {
+                    blocksForSaleStatus[blockId] = false;
+                } else {
+                    throw new Error('Block ' + blockId + ' is not for sale.');
+                }
+            });
+            blocksForSale = blocksForSale.filter(function(blockId){
+                return blocksForSaleStatus[blockId];
+            });
+            if (blocksForSale.length) {
+                owner.selling.blocks = this._stringifyBlocks(blocksForSale);
+            } else {
+                owner.selling = null;
+            }
+            this.owners.set(seller, owner);
         },
 
         /**
@@ -161,8 +187,8 @@ module.exports = (function () {
             this.balances.set(from, balance.sub(amount));
         },
     
-        configure: function(img, href, hint) {
-            this._configure(Blockchain.transaction.from, img, href, hint);
+        configure: function(img, offset, href, hint) {
+            this._configure(Blockchain.transaction.from, img, offset, href, hint);
         },
 
         balance: function() {
@@ -173,19 +199,40 @@ module.exports = (function () {
             return this.balances.get(account) || new BigNumber(0);
         },
     
-        _blockCount: function(rect) {
-            return Math.abs(rect[1] - rect[3] + 1) * Math.abs(rect[2] - rect[0] + 1);
-        },
-    
-        _checkOwnership: function (ownerId, rect) {
-            for (var y = rect[0]; y <= rect[2]; y++) { // top to bottom
-                for (var x = rect[3]; x <= rect[1]; x++) { // left to right
-                    var i = y * WIDTH + x;
-                    if (this.blocks[i] !== ownerId) {
-                        throw new Error('block (' + x + ', ' + y + ') is not owned by the specified account.');
-                    }
+        _checkOwnership: function (ownerId, blocks) {
+            var _this = this;
+            blocks.forEach(function (blockId) {
+                if (_this.blocks[blockId] !== ownerId) {
+                    throw new Error('block ' + blockId + ' is not owned by the specified account.');
                 }
+            });
+        },
+
+        _parseBlocks: function (blocks) {
+            var result = [];
+            for (var i = 0; i < blocks.length; i+=3) {
+                var n = 0;
+                var base = 1;
+                for (var j = 0; j < 3; j++) {
+                    var d = blocks.charCodeAt(i + j) - CHAR_CODE_OF_A;
+                    n += d * base;
+                    base *= BASE;
+                }
+                result.push(n);
             }
+            return result;
+        },
+
+        _stringifyBlocks: function (blocks) {
+           var result = '';
+           blocks.forEach(function(blockId){
+               var n = blockId;
+               for (var i = 0; i < 3; i++) {
+                   result += String.fromCharCode(n % BASE + CHAR_CODE_OF_A);
+                   n = Math.floor(n / BASE);
+               }
+           });
+           return result;
         },
     
         _getOwnerById: function (ownerId) {
@@ -201,42 +248,39 @@ module.exports = (function () {
             return owner;
         },
     
-        _configure: function(account, img, href, hint) {
+        _configure: function(account, img, offset, href, hint) {
             var owner = this.owners.get(account);
             if (!owner) {
                 throw new Error(account + ' is not an owner');
             }
     
             owner.img = img;
+            owner.offset = offset;
             owner.href = href;
             owner.hint = hint;
     
             this.owners.set(account, owner);
         },
     
-       _transfer: function (from, to, rect) {
-            var blocks = this.blocks;
-            var fromOwner = this.owners.get(from);
-            var toOwner = this.owners.get(to);
-            if (!toOwner) {
-                toOwner = this._addOwner(to);
-            }
+       _transfer: function (from, to, blocks) {
+           var allBlocks = this.blocks;
+           var fromOwner = this.owners.get(from);
+           var toOwner = this.owners.get(to);
+           if (!toOwner) {
+               toOwner = this._addOwner(to);
+           }
     
-            for (var y = rect[0]; y <= rect[2]; y++) { // top to bottom
-                for (var x = rect[3]; x <= rect[1]; x++) { // left to right
-                    var i = y * WIDTH + x;
-                    if (blocks[i] !== fromOwner.id) {
-                        throw new Error('block (' + x + ', ' + y + ') is not owned by ' + from);
-                    }
-                    blocks[i] = toOwner.id;
-                }
-            }
-            this.blocks = blocks;
-            var blockCount = this._blockCount(rect);
-            fromOwner.assets -= blockCount;
-            toOwner.assets += blockCount;
-            this.owners.set(from, fromOwner);
-            this.owners.set(to, toOwner);
+           blocks.forEach(function (blockId) {
+               if (allBlocks[blockId] !== fromOwner.id) {
+                   throw new Error('block ' + blockId + ' is not owned by the specified account.');
+               }
+               allBlocks[blockId] = toOwner.id;
+           });
+           this.blocks = allBlocks;
+           fromOwner.assets -= blocks.length;
+           toOwner.assets += blocks.length;
+           this.owners.set(from, fromOwner);
+           this.owners.set(to, toOwner);
        }
     }
     return BlocksContract;
