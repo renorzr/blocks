@@ -1,0 +1,23 @@
+<div class="jumbotron text-center">
+	<h1>格子墙</h1>
+	
+	<p>优质展示位，永久产权，自由转让交易</p>
+    <canvas id="canvas" width="1000" height="1000"></canvas>
+    <table class="table">
+      <thead>
+        <tr>
+            <th>单价</th>
+            <th>数量</th>
+            <th>限制</th>
+            <th></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr ng-repeat="selling in sellings">
+              <td>{{selling.price}}</td>
+              <td>{{selling.blocks}}</td>
+              <td>{{selling.limit[0]}} - {{selling.limit[1]}}</td>
+          </tr>
+      </tbody>
+    </table>
+</div>

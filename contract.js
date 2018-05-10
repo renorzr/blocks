@@ -8,8 +8,8 @@ module.exports = (function () {
     var WIDTH = 100;
     var HEIGHT = 100;
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
-    var FEE_RATE = 0.005;
-    var FEE_LEAST = 0.05;
+    var FEE_RATE = new BigNumber("0.01");
+    var FEE_LEAST = new BigNumber("0.05");
     var CHAR_CODE_OF_A = 65;
     var BASE = 26;
     
@@ -23,14 +23,6 @@ module.exports = (function () {
         LocalContractStorage.defineMapProperties(this, {
             owners: null,
             ownerIds: null,
-            balances: {
-                stringify: function (obj) {
-                    return obj.toString();
-                },
-                parse: function (str) {
-                    return new BigNumber(str);
-                }
-            }
         });
     }
     
@@ -108,26 +100,26 @@ module.exports = (function () {
                 throw new Error('this is private trade');
             }
     
-            var buyerBalance = Blockchain.transaction.value.plus(this.balances.get(buyer) || 0);
+            var buyerPaying = Blockchain.transaction.value;
             var totalPrice = (new BigNumber(owner.selling.price)).mul(blockCount);
             var fee = totalPrice.mul(FEE_RATE);
             if (fee.lt(FEE_LEAST)) {
                 fee = new BigNumber(FEE_LEAST);
             }
             var totalPay = totalPrice.plus(fee);
-            if (buyerBalance.lt(totalPay)) {
+            if (buyerPaying.lt(totalPay)) {
                 throw new Error('not enough money');
             }
     
-            this.balances.set(buyer, buyerBalance.minus(totalPay));
-    
-            var sellerBalance = this.balances.get(seller) || new BigNumber(0);
-            this.balances.set(seller, sellerBalance.plus(totalPrice));
-    
-            var authorBalance = this.balances.get(this.author) || new BigNumber(0);
-            this.balances.set(this.author, authorBalance.plus(fee));
-    
-            this._transfer(seller, buyer, blocks);
+            var overpay = buyerPaying.minus(totalPay);
+
+            // transfer money
+            this._transferNas(buyer, overpay);
+            this._transferNas(seller, totalPrice);
+            this._transferNas(this.author, fee);
+
+            // transfer blocks from seller to buyer
+            this._transferBlocks(seller, buyer, blocks);
 
             // remove sold blocks from selling.blocks
             var blocksForSaleStatus = {};
@@ -152,51 +144,24 @@ module.exports = (function () {
             }
             this.owners.set(seller, owner);
         },
-
-        /**
-         * deposit
-         */
-        deposit: function() {
-            var from = Blockchain.transaction.from;
-            var balance = this._balance(from).plus(Blockchain.transaction.value);
-            this.balances.set(from, balance);
-        },
-    
-        /**
-         * withdraw
-         * value: amount of money
-         */
-        withdraw: function(value) {
-            var from = Blockchain.transaction.from;
-            var amount = new BigNumber(value);
-            var balance = this._balance(from);
-            if (amount.lt(0) || amount.gt(balance)) {
-                throw new Error("Insufficient balance");
-            }
-            var result = Blockchain.transfer(from, amount);
-            if (!result) {
-                throw new Error("transfer failed.");
-            }
-            Event.Trigger("Blocks", {
-                Transfer: {
-                    from: Blockchain.transaction.to,
-                    to: from,
-                    value: amount.toString()
-                }
-            });
-            this.balances.set(from, balance.sub(amount));
-        },
     
         configure: function(img, offset, href, hint) {
             this._configure(Blockchain.transaction.from, img, offset, href, hint);
         },
 
-        balance: function() {
-            return this._balance(Blockchain.transaction.from);
-        },
-    
-        _balance: function(account) {
-            return this.balances.get(account) || new BigNumber(0);
+        withdraw: function(amount) {
+            _transferNas(this.author, new BigNumber(amount));
+        }
+
+        _transferNas: function(to, amount) {
+            Blockchain.transfer(to, amount);
+            Event.Trigger("Blocks", {
+                Transfer: {
+                    from: Blockchain.transaction.to,
+                    to: to,
+                    value: amount.toString()
+                }
+            });
         },
     
         _checkOwnership: function (ownerId, blocks) {
@@ -262,7 +227,7 @@ module.exports = (function () {
             this.owners.set(account, owner);
         },
     
-       _transfer: function (from, to, blocks) {
+       _transferBlocks: function (from, to, blocks) {
            var allBlocks = this.blocks;
            var fromOwner = this.owners.get(from);
            var toOwner = this.owners.get(to);
