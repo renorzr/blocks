@@ -17,7 +17,8 @@ module.exports = (function () {
         LocalContractStorage.defineProperties(this, {
             author: null,
             nextOwnerId: null,
-            blocks: null
+            blocks: null,
+            orders: null
         });
     
         LocalContractStorage.defineMapProperties(this, {
@@ -33,6 +34,7 @@ module.exports = (function () {
             var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
             this._configure(this.author, IMG, ZERO, HREF, HINT);
             this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
+            this.orders = [];
             owner.assets = TOTAL_BLOCKS;
         },
     

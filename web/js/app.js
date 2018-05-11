@@ -94,13 +94,6 @@ function stringifyBlocks(blocks) {
 
 function render(data) {
     var ctx = document.getElementById('canvas').getContext('2d');
-    for (var i = 0; i < data.blocks.length; i++) {
-        var ownerId = data.blocks[i];
-        var owner = data.owners[ownerId];
-        if (!owner.blocks) {owner.blocks = [];}
-        owner.blocks.push(i);
-    }
-    shuffle(owner.blocks);
     for (var ownerId in data.owners) {
         var owner = data.owners[ownerId];
         console.log('owner[' + ownerId + ']=', owner);
@@ -113,11 +106,25 @@ function render(data) {
         var offsetCol = Math.round(offsetBlock % ROW_BLOCK_NUM);
         owner.offsetX = Math.round(offsetCol * BK_SIZE);
         owner.offsetY = Math.round(offsetRow * BK_SIZE);
+        img.setAttribute('crossOrigin', 'anonymous');
         img.onload = (function(owner) {
             return function() {
-                renderOwner(ctx, owner)
+                owner.loaded = true;
             }
         })(owner);
+    }
+    for (var i = 0; i < data.blocks.length; i++) {
+        var ownerId = data.blocks[i];
+        var owner = data.owners[ownerId];
+        renderOnLoad(ctx, owner, i);
+    }
+}
+
+function renderOnLoad(ctx, owner, blockId) {
+    if (owner.loaded) {
+        renderBlock(ctx, owner, blockId);
+    } else {
+        setTimeout(function(){renderOnLoad(ctx, owner, blockId)}, Math.random() * 100);
     }
 }
 
@@ -126,7 +133,7 @@ function renderOwner(ctx, owner) {
     owner.blocks.forEach(function(blockId) {
         setTimeout(function() {
             renderBlock(ctx, owner, blockId)
-        }, 1);
+        }, 100 * Math.random());
     });
 }
 
@@ -141,16 +148,5 @@ function renderBlock(ctx, owner, blockId) {
     if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
         ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x, y, BK_SIZE, BK_SIZE);
     }
-}
-
-function shuffle(array) {
-  var m = array.length, t, i;
-
-  while (m) {
-    i = Math.floor(Math.random() * m--);
-    t = array[m];
-    array[m] = array[i];
-    array[i] = t;
-  }
 }
 
