@@ -1,6 +1,7 @@
 "use strict"
 
 module.exports = (function () {
+    var NAS = new BigNumber("1e18");
     var IMG = 'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png';
     var ZERO = 'AAA';
     var HREF = 'https://www.google.com/';
@@ -9,37 +10,49 @@ module.exports = (function () {
     var HEIGHT = 100;
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
     var FEE_RATE = new BigNumber("0.01");
-    var FEE_LEAST = new BigNumber("0.05");
+    var FEE_LEAST = NAS.mul(0.1);
     var CHAR_CODE_OF_A = 65;
     var BASE = 26;
+    var BUY = 0;
+    var SELL = 1;
+    var DEFAULT_LIMIT = [0, TOTAL_BLOCKS];
     
     var BlocksContract = function () {
         LocalContractStorage.defineProperties(this, {
             author: null,
             nextOwnerId: null,
-            blocks: null,
-            orders: null
+            nextOrderId: null,
+            orders: null,
+            blocks: null
         });
     
         LocalContractStorage.defineMapProperties(this, {
             owners: null,
             ownerIds: null,
+            orderBalances: {
+                stringify: function(value) {
+                    return value.toString();
+                },
+                parse: function(value) {
+                    return new BigNumber(value);
+                }
+            }
         });
     }
     
     BlocksContract.prototype = {
         init: function () {
             this.nextOwnerId = 0;
+            this.nextOrderId = 0;
+            this.orders = {};
             this.author = Blockchain.transaction.from;
             var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
-            this._configure(this.author, IMG, ZERO, HREF, HINT);
+            this._configure(this.author, {img: IMG, offset: ZERO, href: HREF, hint: HINT});
             this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
-            this.orders = [];
             owner.assets = TOTAL_BLOCKS;
         },
     
         get: function () {
-            console.log('owners=', this.owners);
             var owners = {};
             var _this = this;
             this.blocks.forEach(function(ownerId){
@@ -54,106 +67,190 @@ module.exports = (function () {
         },
     
         /**
-         * sell
+         * create a order
+         * direction: 0-buy 1-sell
          * price: price per block
          * blocks: blocks to sell
          * limit: limit of blockCount of blocks for 1 trade. format: [min, max]
-         * to: only sell to specified account, null for no limit
          */
-        sell: function (price, blocks, limit, to) {
+        order: function (direction, price, blocks, limit) {
             var from = Blockchain.transaction.from;
-            var owner = this.owners.get(from);
-            if (!(owner && owner.assets)) {
-                throw new Error('nothing to sell.');
-            }
-    
-            this._checkOwnership(owner.id, this._parseBlocks(blocks));
-    
-            owner.selling = {
+
+            var order = {
+                creator: this._getOrCreateOwner(from).id,
+                direction: direction,
                 price: price,
                 blocks: blocks,
-                limit: limit,
-                to: to
+                limit: limit
             }
-            this.owners.set(from, owner);
+
+            if (price < 0.1) {
+                throw new Error('ILLEGAL_PRICE');
+            }
+
+            blocks = this._parseBlocks(blocks);
+            if (blocks.length === 0) {
+                throw new Error('EMPTY_ORDER');
+            }
+
+            if (direction === SELL) {
+                var owner = this.owners.get(from);
+                if (!(owner && owner.assets)) {
+                    throw new Error('NOTHING_TO_SELL');
+                }
+                this._checkOwnership(owner.id, blocks);
+                return this._createOrder(order);
+            } else if (direction === BUY) {
+                var paying = Blockchain.transaction.value;
+                var totalPrice = NAS.mul(order.price).mul(blocks.length);
+                var overpay = paying.minus(totalPrice);
+                if (overpay.gt(0)) {
+                    // return overpay
+                    this._transferNas(from, overpay);
+                } else if (overpay.lt(0)) {
+                    throw new Error('INSUFFICIENT_MONEY');
+                }
+                blocks.forEach(function(blockId){
+                    if (blockId < 0 || blockId >= TOTAL_BLOCKS) {
+                        throw new Error("OUT_OF_RANGE");
+                    }
+                });
+                var newOrder = this._createOrder(order);
+                this.orderBalances.set(newOrder.id, totalPrice);
+                return newOrder;
+            } else {
+                throw new Error("UNKNOWN_DIRECTION:" + direction);
+            }
+        },
+
+        /**
+         * cancel an order
+         */
+        cancel: function (orderId) {
+            var from = Blockchain.transaction.from;
+            var owner = this.owners.get(from);
+            if (!(owner && this.orders[orderId].creator === owner.id)) {
+                throw new Error('WRONG_ORDER_OWNERSHIP');
+            }
+            var balance = this.orderBalances.get(orderId);
+            if (balance && balance.gt(0)) {
+                this._transferNas(from, balance);
+            }
+            this.orderBalances.del(orderId);
+            var orders = this.orders;
+            delete(orders[orderId]);
+            this.orders = orders;
+        },
+
+        /**
+         * market: list all orders
+         */
+        market: function (){
+            return this.orders;
         },
     
         /**
-         * buy from a specified seller
-         * seller: seller account
+         * trade order
+         * direction: 0-buy 1-sell
+         * sellingId: sellingId
          * blocks: blocks to buy
          */
-        buy: function (sellerId, blocks) {
-            var seller = this.ownerIds.get(sellerId);
-            var owner = this.owners.get(seller);
-            if (!(owner && owner.selling)) {
-                throw new Error('user ' + sellerId + ' is not selling anything.');
+        trade: function (direction, orderId, blocks) {
+            var order = this.orders[orderId];
+            if (!(order && order.blocks && order.direction === direction)) {
+                throw new Error('ORDER_UNAVAILABLE');
             }
+            var opponent = this.ownerIds.get(order.creator);
     
             blocks = this._parseBlocks(blocks);
             var blockCount = blocks.length;
-            var limit = owner.selling.limit;
+            var limit = order.limit || DEFAULT_LIMIT;
             if (blockCount < limit[0] || blockCount > limit[1]) {
-                throw new Error('blockCount is not in range [' + limit[0] + ', ' + limit[1] + ']');
+                throw new Error('OUT_OF_RANGE:[' + limit[0] + ', ' + limit[1] + ']');
             }
     
-            var buyer = Blockchain.transaction.from;
-            if (owner.selling.to && buyer !== owner.selling.to) {
-                throw new Error('this is private trade');
-            }
-    
-            var buyerPaying = Blockchain.transaction.value;
-            var totalPrice = (new BigNumber(owner.selling.price)).mul(blockCount);
+            var from = Blockchain.transaction.from;
+            var totalPrice = NAS.mul(order.price).mul(blockCount);
             var fee = totalPrice.mul(FEE_RATE);
             if (fee.lt(FEE_LEAST)) {
-                fee = new BigNumber(FEE_LEAST);
+                fee = FEE_LEAST;
             }
-            var totalPay = totalPrice.plus(fee);
-            if (buyerPaying.lt(totalPay)) {
-                throw new Error('not enough money');
-            }
-    
-            var overpay = buyerPaying.minus(totalPay);
-
-            // transfer money
-            this._transferNas(buyer, overpay);
-            this._transferNas(seller, totalPrice);
+            // money to author
             this._transferNas(this.author, fee);
 
-            // transfer blocks from seller to buyer
-            this._transferBlocks(seller, buyer, blocks);
+            if (direction === BUY) {
+                // i'm selling because the order is BUY
 
-            // remove sold blocks from selling.blocks
-            var blocksForSaleStatus = {};
-            var blocksForSale = this._parseBlocks(owner.selling.blocks);
-            blocksForSale.forEach(function(blockId){
-                blocksForSaleStatus[blockId] = true;
+                // order balance
+                var balance = this.orderBalances.get(orderId);
+                balance = balance.minus(totalPrice);
+                if (balance.lt(0)) {
+                    throw new Error('INSUFFICIENT_MONEY');
+                }
+                this.orderBalances.set(orderId, balance);
+
+                // money to seller (me)
+                this._transferNas(from, totalPrice.minus(fee));
+                // blocks to buyer (opponent)
+                this._transferBlocks(from, opponent, blocks);
+            } else {
+                // i'm buying because the order is SELL
+
+                // money to seller (opponent)
+                this._transferNas(opponent, totalPrice);
+                // blocks to buyer (me)
+                this._transferBlocks(opponent, from, blocks);
+
+                var paying = Blockchain.transaction.value;
+                var totalPay = totalPrice.plus(fee);
+                var overpay = paying.minus(totalPay);
+                if (overpay.gt(0)) {
+                    // return overpay
+                    this._transferNas(from, overpay);
+                } else if (overpay.lt(0)) {
+                    throw new Error('INSUFFICIENT_MONEY');
+                }
+            }
+            this._removeOrderBlocks(order, blocks);
+        },
+
+        /*
+         * remove blocks from order
+         */
+        _removeOrderBlocks: function (order, blocks) {
+            // remove sold blocks from order.blocks
+            var blocksInOrderStatus = {};
+            var blocksInOrder = this._parseBlocks(order.blocks);
+            blocksInOrder.forEach(function(blockId){
+                blocksInOrderStatus[blockId] = true;
             });
             blocks.forEach(function(blockId){
-                if (blocksForSaleStatus[blockId]) {
-                    blocksForSaleStatus[blockId] = false;
+                if (blocksInOrderStatus[blockId]) {
+                    blocksInOrderStatus[blockId] = false;
                 } else {
-                    throw new Error('Block ' + blockId + ' is not for sale.');
+                    throw new Error('OUT_OF_RANGE:' + blockId);
                 }
             });
-            blocksForSale = blocksForSale.filter(function(blockId){
-                return blocksForSaleStatus[blockId];
+            blocksInOrder = blocksInOrder.filter(function(blockId){
+                return blocksInOrderStatus[blockId];
             });
-            if (blocksForSale.length) {
-                owner.selling.blocks = this._stringifyBlocks(blocksForSale);
+            var orders = this.orders;
+            if (blocksInOrder.length > 0) {
+                order.blocks = this._stringifyBlocks(blocksInOrder);
+                orders[order.id] = order;
             } else {
-                owner.selling = null;
+                delete(orders[order.id]);
             }
-            this.owners.set(seller, owner);
+            this.orders = orders;
         },
     
-        configure: function(img, offset, href, hint) {
-            this._configure(Blockchain.transaction.from, img, offset, href, hint);
+        configure: function(config) {
+            this._configure(Blockchain.transaction.from, config);
         },
 
         withdraw: function(amount) {
             _transferNas(this.author, new BigNumber(amount));
-        }
+        },
 
         _transferNas: function(to, amount) {
             Blockchain.transfer(to, amount);
@@ -170,7 +267,7 @@ module.exports = (function () {
             var _this = this;
             blocks.forEach(function (blockId) {
                 if (_this.blocks[blockId] !== ownerId) {
-                    throw new Error('block ' + blockId + ' is not owned by the specified account.');
+                    throw new Error('WRONG_OWNERSHIP:' + blockId);
                 }
             });
         },
@@ -205,6 +302,14 @@ module.exports = (function () {
         _getOwnerById: function (ownerId) {
             return this.owners.get(this.ownerIds.get(ownerId));
         },
+
+        _getOrCreateOwner: function(account) {
+            var owner = this.owners.get(account);
+            if (!owner) {
+                return this._addOwner(account);
+            }
+            return owner;
+        },
     
         _addOwner: function (account, data) {
             var ownerId = this.nextOwnerId++;
@@ -214,17 +319,51 @@ module.exports = (function () {
             this.owners.set(account, owner);
             return owner;
         },
+
+        _createOrder: function (newOrder) {
+            // check duplication
+            var blockInNewOrder = {};
+            this._parseBlocks(newOrder.blocks).forEach(function (blockId) {
+                blockInNewOrder[blockId] = true;
+            });
+
+            var orders = this.orders;
+
+            for (var orderId in orders) {
+                var order = orders[orderId];
+                if (order.direction === newOrder.direction && order.creator === newOrder.creator) {
+                    this._parseBlocks(order.blocks).forEach(function (blockId) {
+                        if (blockInNewOrder[blockId]) {
+                            throw new Error('DUP_ORDER_BLOCK');
+                        }
+                    });
+                }
+            };
+
+            newOrder.id = this.nextOrderId++;
+            orders[newOrder.id] = newOrder;
+            this.orders = orders;
+            return newOrder;
+        },
     
-        _configure: function(account, img, offset, href, hint) {
+        _configure: function(account, config) {
             var owner = this.owners.get(account);
             if (!owner) {
-                throw new Error(account + ' is not an owner');
+                throw new Error('OWN_NOTHING');
             }
     
-            owner.img = img;
-            owner.offset = offset;
-            owner.href = href;
-            owner.hint = hint;
+            if (config.img !== undefined) {
+                owner.img = config.img;
+            }
+            if (config.offset !== undefined) {
+                owner.offset = config.offset;
+            }
+            if (config.href !== undefined) {
+                owner.href = config.href;
+            }
+            if (config.hint !== undefined) {
+                owner.hint = config.hint;
+            }
     
             this.owners.set(account, owner);
         },
@@ -232,14 +371,11 @@ module.exports = (function () {
        _transferBlocks: function (from, to, blocks) {
            var allBlocks = this.blocks;
            var fromOwner = this.owners.get(from);
-           var toOwner = this.owners.get(to);
-           if (!toOwner) {
-               toOwner = this._addOwner(to);
-           }
+           var toOwner = this._getOrCreateOwner(to);
     
            blocks.forEach(function (blockId) {
                if (allBlocks[blockId] !== fromOwner.id) {
-                   throw new Error('block ' + blockId + ' is not owned by the specified account.');
+                   throw new Error('WRONG_OWNERSHIP:' + blockId);
                }
                allBlocks[blockId] = toOwner.id;
            });
