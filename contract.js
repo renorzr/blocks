@@ -65,6 +65,10 @@ module.exports = (function () {
                 blocks: this.blocks
             }
         },
+
+        mine: function () {
+            return this.owners.get(Blockchain.transaction.from);
+        },
     
         /**
          * create a order
@@ -193,6 +197,17 @@ module.exports = (function () {
                 this._transferNas(from, totalPrice.minus(fee));
                 // blocks to buyer (opponent)
                 this._transferBlocks(from, opponent, blocks);
+
+                // remove blocks from my sell order
+                var ownerId = this.owners.get(from).id;
+                var orders = this.orders;
+                for (var orderId in orders) {
+                    var order = orders[orderId];
+                    if (order.direction === SELL && order.creator === ownerId) {
+                        this._removeOrderBlocks(order, blocks, false);
+                        break;
+                    }
+                };
             } else {
                 // i'm buying because the order is SELL
 
@@ -211,13 +226,13 @@ module.exports = (function () {
                     throw new Error('INSUFFICIENT_MONEY');
                 }
             }
-            this._removeOrderBlocks(order, blocks);
+            this._removeOrderBlocks(order, blocks, true);
         },
 
         /*
          * remove blocks from order
          */
-        _removeOrderBlocks: function (order, blocks) {
+        _removeOrderBlocks: function (order, blocks, checkRange) {
             // remove sold blocks from order.blocks
             var blocksInOrderStatus = {};
             var blocksInOrder = this._parseBlocks(order.blocks);
@@ -227,7 +242,7 @@ module.exports = (function () {
             blocks.forEach(function(blockId){
                 if (blocksInOrderStatus[blockId]) {
                     blocksInOrderStatus[blockId] = false;
-                } else {
+                } else if (checkRange) {
                     throw new Error('OUT_OF_RANGE:' + blockId);
                 }
             });

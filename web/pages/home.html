@@ -1,48 +1,133 @@
 <div class="jumbotron text-center">
-	<h1>格子墙</h1>
-	
 	<p>优质展示位，永久产权，自由转让交易</p>
     <canvas id="canvas" width="1000" height="1000" crossOrigin="Anonymous"></canvas>
-    <div class="row">
-      <div class="col-sm-6">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>单价</th>
-              <th>数量</th>
-              <th>限制</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr ng-repeat="selling in sellings">
-                <td class="text-left">{{selling.price}}</td>
-                <td class="text-left">{{selling.blocks}}</td>
-                <td class="text-left">{{selling.limit.join(' - ')}}</td>
-                <td class="text-left"><a>查看</a> <a>购买</a></td>
-            </tr>
-          </tbody>
-        </table>
+    <div ng-show="mode != 0">
+      <canvas id="canvasTop" width="1000" height="1000" style="position:absolute;top:{{canvasPos[1]}}px;left:{{canvasPos[0]}}px;z-index:99" onmousedown="scope.mousedown(event)" onmouseup="scope.mouseup(event)" onmousemove="scope.mousemove(event)"></canvas>
+      <div class="row">
+        <div class="btn-group" role="group" aria-label="...">
+          <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable">取消选取</button>
+          <button type="button" class="btn btn-default" ng-click="confirmOrder()" ng-show="mode == 1 && !tradingOrder" ng-disabled="selectedBlocks.length == 0">{{orderDirection ? '出售' : '求购'}}选中的格子</button>
+          <button type="button" class="btn btn-default" ng-click="confirmTrade()" ng-show="selectable && tradingOrder" title="执行当前选中的交易单" ng-disabled="selectedBlocks.length == 0">交易选中的格子</button>
+          <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == myOwnerId" title="撤销当前选中的交易单">撤销交易单</button>
+          <button type="button" class="btn btn-default" ng-click="addPic()" ng-show="mode == 2" title="添加图片">添加图片</button>
+          <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
+        </div>
       </div>
-      <div class="col-sm-6">
+    </div>
+    <div class="btn-group" role="group" aria-label="..." ng-hide="mode != 0 || !account">
+      <button type="button" class="btn btn-default" ng-click="startOrder(0)">
+        <i class="fa fa-th" aria-hidden="true"></i>
+        求购
+      </button>
+      <button type="button" class="btn btn-default" ng-click="startOrder(1)">
+        <i class="fa fa-money" aria-hidden="true"></i>
+        出售
+      </button>
+      <button type="button" class="btn btn-default" ng-click="setup()">
+        <i class="fa fa-cog" aria-hidden="true"></i>
+        我的格子
+      </button>
+    </div>
+    <div ng-hide="account">
+        如需交易请安装 <a target="_blank" href="https://github.com/ChengOrangeJu/WebExtensionWallet">WebExtensionWallet</a> 并导入星云钱包。
+    </div>
+    <h2>交易区</h2>
+    <div class="row">
+      <div class="col-sm-6" ng-repeat="dir in directions">
+        <h3 ng-if="dir==0">求购单</h3>
+        <h3 ng-if="dir==1">出售单</h3>
         <table class="table">
           <thead>
             <tr>
+              <th>ID</th>
               <th>单价</th>
               <th>数量</th>
               <th>限制</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr ng-repeat="selling in sellings">
-                <td class="text-left">{{selling.price}}</td>
-                <td class="text-left">{{selling.blocks}}</td>
-                <td class="text-left">{{selling.limit.join(' - ')}}</td>
-                <td class="text-left"><a>查看</a> <a>购买</a></td>
+              <tr ng-repeat="order in orders | filter: {direction:dir}" ng-class="{'highlight': tradingOrder.id == order.id}">
+              <td class="text-left">{{order.id}}</td>
+              <td class="text-left">{{order.price}}</td>
+              <td class="text-left">{{order.blocks.length}}</td>
+              <td class="text-left">{{order.limit.join(' - ')}}</td>
+              <td class="text-left">
+                <a title="查看" href="#" ng-show="account" ng-click="startTrade(order.id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
+                <i class="fa fa-user" title="我的交易单" ng-show="order.creator === myOwnerId"></i>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="tradeModal" tabindex="-1" role="dialog" aria-labelledby="tradeModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="tradeModalLabel">执行交易</h4>
+      </div>
+      <div class="modal-body">
+          <p>{{tradingOrder.direction ? '买入' : '卖出'}}选中的{{selectedBlocks.length}}个格子？</p>
+          <p>详情</p>
+          <p>总数: {{selectedBlocks.length}}</p>
+          <p>单价: {{tradingOrder.price|number:3}} NAS</p>
+          <p>总价: {{totalPrice|number:3}} NAS</p>
+          <p>手续费：{{fee|number:3}}</p>
+          <p>您将{{tradingOrder.direction ? '支付' : '得到'}} {{pay|number:3}} NAS</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" ng-click="trade()">成交</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="orderModal" tabindex="-1" role="dialog" aria-labelledby="orderModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="orderModalLabel">挂单</h4>
+      </div>
+      <div class="modal-body">
+          <p>挂单{{orderDirection ?  '出售' : '求购'}}选中的{{selectedBlocks.length}}个格子？</p>
+          <p>详情</p>
+          <p>总数: {{selectedBlocks.length}}</p>
+          <p>单价: <input ng-model="orderPrice" style="width:50px;"></input> NAS</p>
+          <p>总价: {{orderTotalPrice()|number:3}} NAS</p>
+          <p>限制(单次交易): 最少<input ng-model="minBlocks" style="width:50px"></input>格 最多<input ng-model="maxBlocks" style="width:50px"></input>格</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" ng-click="createOrder()">挂单</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="txModal" tabindex="-1" role="dialog" aria-labelledby="txModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="txModalLabel">操作已发送</h4>
+      </div>
+      <div class="modal-body">
+          您的操作已发送，交易号为：{{txhash}}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" ng-click="closeTxModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="display: none">
+  <input id="image-input" type="file"></file>
 </div>
