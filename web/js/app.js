@@ -85,37 +85,55 @@ blocksApp.controller('homeController', function($scope, $http) {
     });
 
     $scope.mousedown = function(e) {
-        if ($scope.selectable) {
-            $scope.rect = {x: e.offsetX, y: e.offsetY, w: 0, h: 0};
-            $scope.updateLastBlock(e.offsetX, e.offsetY, function(){$scope.selectRectBlocks()});
-        } else if ($scope.newImage) {
-            $scope.updateLastBlock(e.offsetX, e.offsetY, function(){$scope.relocateNewImage()});
-        }
+        $scope.drag = {
+            startX: e.offsetX, startY: e.offsetY,
+            x: e.offsetX, y: e.offsetY,
+            dX: 0, dY: 0
+        };
+        $scope.updateLastBlock(e.offsetX, e.offsetY);
     }
 
     $scope.mousemove = function(e) {
-        if ($scope.rect) {
-            $scope.rect.w = e.offsetX - $scope.rect.x;
-            $scope.rect.h = e.offsetY - $scope.rect.y;
-            $scope.updateLastBlock(e.offsetX, e.offsetY, function(){$scope.selectRectBlocks()});
-            $scope.invalidate();
-        } else if ($scope.newImage) {
-            $scope.updateLastBlock(e.offsetX, e.offsetY, function(){$scope.relocateNewImage()});
+        if ($scope.drag) {
+            var drag = $scope.drag;
+            drag.x = e.offsetX;
+            drag.y = e.offsetY;
+            drag.dX = drag.x - drag.startX;
+            drag.dY = drag.y - drag.startY;
+            $scope.updateLastBlock(e.offsetX, e.offsetY);
             $scope.invalidate();
         }
     }
 
     $scope.mouseup = function(e) {
-        $scope.rect = null;
+        if ($scope.newImage) {
+            $scope.newImageX += $scope.drag.dX;
+            $scope.newImageY += $scope.drag.dY;
+        }
+        $scope.updateSelectedBlocks();
+        $scope.drag = null;
         $scope.invalidate();
         $scope.$apply();
     }
 
-    $scope.updateLastBlock = function (x, y, callback) {
+    $scope.updateSelectedBlocks = function () {
+        if ($scope.selectable) {
+            $scope.selectedBlocks = [];
+            for (var blockId in $scope.blockStatus) {
+                if ($scope.blockStatus[blockId].selected) {
+                    $scope.selectedBlocks.push(blockId);
+                }
+            }
+        }
+    }
+
+    $scope.updateLastBlock = function (x, y) {
         var currentBlock = getBlockByPos(x, y);
         if ($scope.lastBlock !== currentBlock) {
             $scope.lastBlock = currentBlock;
-            callback();
+            if ($scope.selectable) {
+                $scope.selectRectBlocks();
+            }
         }
     }
 
@@ -128,39 +146,32 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.selectRectBlocks = function () {
-        var rect = $scope.rect;
-        var left = Math.min(rect.x, rect.x + rect.w);
-        var right = Math.max(rect.x, rect.x + rect.w);
-        var top = Math.min(rect.y, rect.y + rect.h);
-        var bottom = Math.max(rect.y, rect.y + rect.h);
+        var drag = $scope.drag;
+        var left = Math.min(drag.x, drag.startX);
+        var right = Math.max(drag.x, drag.startX);
+        var top = Math.min(drag.y, drag.startY);
+        var bottom = Math.max(drag.y, drag.startY);
         var startCol = Math.floor(left / BK_SIZE);
         var startRow = Math.floor(top / BK_SIZE);
         var endCol = Math.floor(right / BK_SIZE);
         var endRow = Math.floor(bottom / BK_SIZE);
-        $scope.selectedBlocks = [];
         for (var col = startCol; col <= endCol; col++) {
             for (var row = startRow; row <= endRow; row++) {
                 var blockId = Math.round(row * ROW_BLOCK_NUM + col);
                 var blockStatus = $scope.blockStatus[blockId];
                 if (blockStatus.selectable) {
                     blockStatus.selected = true;
-                    $scope.selectedBlocks.push(blockId);
                 }
             }
         }
     }
 
-    $scope.relocateNewImage = function () {
-    }
-
     $scope.startTrade = function (orderId) {
         console.log('start trade', orderId);
+        $scope.resetTradeBlocks();
         $scope.mode = MODE_TRADE;
         $scope.tradingOrder = $scope.getOrderById(orderId);
         $scope.selectable = $scope.tradingOrder.creator != $scope.myOwnerId;
-        $scope.blockStatus.forEach(function(blockStatus) {
-            blockStatus.selectable = false;
-        });
         $scope.tradingOrder.blocks.forEach(function(blockId){
             $scope.blockStatus[blockId].selectable = true;
         });
@@ -178,8 +189,17 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.exitTrade = function () {
+        $scope.resetTradeBlocks();
+    }
+
+    $scope.resetTradeBlocks = function () {
+        console.log('reset trade blocks');
         $scope.mode = MODE_NORMAL;
         $scope.tradingOrder = null;
+        $scope.newImage = $scope.newImageX = $scope.newImageY = null;
+        for (var blockId in $scope.blockStatus) {
+            $scope.blockStatus[blockId] = {};
+        }
     }
 
     $scope.confirmTrade = function () {
@@ -214,6 +234,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.startOrder = function (direction) {
+        $scope.resetTradeBlocks();
         $scope.orderDirection = direction;
         var sell = direction;
         $scope.mode = MODE_TRADE;
@@ -241,16 +262,24 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.invalidate = function() {
-        var rect = $scope.rect;
+        var drag = $scope.drag;
         var ctx = $scope.ctxTop;
         $scope.clear();
-        ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = "#000000";
-        ctx.fillStyle = "#a0a0a0";
-        ctx.fillRect(0, 0, ROW_BLOCK_NUM * BK_SIZE, ROW_BLOCK_NUM * BK_SIZE);
-        if (rect) {
-            ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.globalAlpha = 1;
+        if ($scope.selectable && drag) {
+            ctx.strokeRect(drag.startX, drag.startY, drag.dX, drag.dY);
         }
+        if ($scope.newImage) {
+            var img = $scope.newImage;
+            var x = $scope.newImageX;
+            var y = $scope.newImageY;
+            if (drag) {
+                x += drag.dX;
+                y += drag.dY;
+            }
+            ctx.drawImage(img, x, y);
+        }
+        ctx.globalAlpha = 0.8;
         for (var blockId in $scope.blockStatus) {
             var row = Math.floor(blockId / ROW_BLOCK_NUM);
             var col = blockId % ROW_BLOCK_NUM;
@@ -259,11 +288,10 @@ blocksApp.controller('homeController', function($scope, $http) {
             var blockStatus = $scope.blockStatus[blockId];
             ctx.strokeStyle = "#a0a0a0";
             ctx.strokeRect(x, y, BK_SIZE, BK_SIZE);
-            if (blockStatus.highlight) {
-                ctx.fillStyle = "#ffffff";
+            if (!blockStatus.highlight) {
+                ctx.strokeStyle = "#000000";
+                ctx.fillStyle = "#a0a0a0";
                 ctx.fillRect(x, y, BK_SIZE, BK_SIZE);
-                ctx.strokeStyle = "#ffffff";
-                ctx.strokeRect(x, y, BK_SIZE, BK_SIZE);
             }
             if (blockStatus.selected) {
                 ctx.fillStyle = "#0000ff";
@@ -276,10 +304,6 @@ blocksApp.controller('homeController', function($scope, $http) {
                 ctx.strokeRect(x, y, BK_SIZE, BK_SIZE);
             }
         };
-        if ($scope.newImage) {
-            var img = $scope.newImage;
-            ctx.drawImage(img, 0, 0);
-        }
     }
 
     $scope.clear = function () {
@@ -301,7 +325,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.onNebMessage = function (data) {
-        if(data.account) {
+        if (data.account) {
             console.log('account', data.account);
             $scope.account = data.account;
             var mineCall = '{"from":"' + $scope.account + '","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"mine","args":"[]"}}';
@@ -326,6 +350,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.setup = function () {
+        $scope.resetTradeBlocks();
         $scope.mode = MODE_SETUP;
         $scope.selectable = false;
         var blocks = $scope.overallData.blocks;
@@ -340,6 +365,62 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.addPic = function () {
         $('#image-input').click();
         $('#image-input').change(function() {loadImg($scope)});
+    }
+
+    $scope.assembleImage = function () {
+        if ($scope.newImage) {
+            var owner = $scope.overallData.owners[$scope.myOwnerId];
+            var img = $scope.newImage;
+            var blocks = $scope.overallData.blocks;
+            var leftMostCol = ROW_BLOCK_NUM;
+            var rightMostCol = 0;
+            var topMostRow = ROW_BLOCK_NUM;
+            var bottomMostRow = 0;
+
+            for (var blockId in blocks) {
+                var ownerId = blocks[blockId];
+                if (ownerId === $scope.myOwnerId) {
+                    var row = Math.floor(blockId / ROW_BLOCK_NUM);
+                    var col = blockId % ROW_BLOCK_NUM;
+                    leftMostCol = Math.min(leftMostCol, col);
+                    rightMostCol = Math.max(rightMostCol, col);
+                    topMostRow = Math.min(topMostRow, row);
+                    bottomMostRow = Math.max(bottomMostRow, row);
+                }
+            }
+
+            var leftMost = leftMostCol * BK_SIZE;
+            var topMost = topMostRow * BK_SIZE;
+            var assembleCanvas = document.getElementById('assemble');
+            assembleCanvas.width = (rightMostCol - leftMostCol + 1) * BK_SIZE;
+            assembleCanvas.height = (bottomMostRow - topMostRow + 1) * BK_SIZE;
+            var ctx = assembleCanvas.getContext('2d');
+
+            for (var blockId in blocks) {
+                var ownerId = blocks[blockId];
+                if (ownerId === $scope.myOwnerId) {
+                    var row = Math.floor(blockId / ROW_BLOCK_NUM);
+                    var col = blockId % ROW_BLOCK_NUM;
+                    var ownerId = blocks[blockId];
+                    var x = Math.round(col * BK_SIZE);
+                    var y = Math.round(row * BK_SIZE);
+                    var clipX = Math.round(x - $scope.newImageX);
+                    var clipY = Math.round(y - $scope.newImageY);
+                    if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
+                        ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x - leftMost, y - topMost, BK_SIZE, BK_SIZE);
+                    } else {
+                        renderBlock(ctx, owner, blockId, -leftMost, -topMost);
+                    }
+                }
+            }
+            var blockOffset = topMostRow * ROW_BLOCK_NUM + leftMostCol;
+            owner.offset = stringifyBlocks([blockOffset]);
+            owner.img = assembleCanvas.toDataURL();
+
+            $scope.newImage = null;
+            render($scope.ctx, $scope.overallData);
+            $scope.invalidate();
+        }
     }
 });
 
@@ -411,15 +492,9 @@ function renderOnLoad(ctx, owner, blockId) {
     }
 }
 
-function renderOwner(ctx, owner) {
-    owner.blocks.forEach(function(blockId) {
-        setTimeout(function() {
-            renderBlock(ctx, owner, blockId)
-        }, 100 * Math.random());
-    });
-}
-
-function renderBlock(ctx, owner, blockId) {
+function renderBlock(ctx, owner, blockId, offsetX, offsetY) {
+    if (!offsetX) offsetX = 0;
+    if (!offsetY) offsetY = 0;
     var img = owner.img;
     var row = Math.floor(blockId / ROW_BLOCK_NUM);
     var col = blockId % ROW_BLOCK_NUM;
@@ -428,7 +503,7 @@ function renderBlock(ctx, owner, blockId) {
     var clipX = Math.round(x - owner.offsetX);
     var clipY = Math.round(y - owner.offsetY);
     if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
-        ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x, y, BK_SIZE, BK_SIZE);
+        ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x + offsetX, y + offsetY, BK_SIZE, BK_SIZE);
     }
 }
 
@@ -464,10 +539,11 @@ function loadImg(scope){
     var reader = new FileReader();
     var imgFile;
     reader.onload=function(e) {
-        var image = new Image();
-        image.src = e.target.result;
-        scope.newImage = image;
-        image.onload = function () {
+        var img = new Image();
+        img.src = e.target.result;
+        scope.newImageX = scope.newImageY = 0;
+        scope.newImage = img;
+        img.onload = function () {
             scope.invalidate();
         }
     };

@@ -4,17 +4,21 @@
     <div ng-show="mode != 0">
       <canvas id="canvasTop" width="1000" height="1000" style="position:absolute;top:{{canvasPos[1]}}px;left:{{canvasPos[0]}}px;z-index:99" onmousedown="scope.mousedown(event)" onmouseup="scope.mouseup(event)" onmousemove="scope.mousemove(event)"></canvas>
       <div class="row">
-        <div class="btn-group" role="group" aria-label="...">
+        <div class="btn-group" role="group" aria-label="..." ng-show="mode == 1">
           <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable">取消选取</button>
           <button type="button" class="btn btn-default" ng-click="confirmOrder()" ng-show="mode == 1 && !tradingOrder" ng-disabled="selectedBlocks.length == 0">{{orderDirection ? '出售' : '求购'}}选中的格子</button>
           <button type="button" class="btn btn-default" ng-click="confirmTrade()" ng-show="selectable && tradingOrder" title="执行当前选中的交易单" ng-disabled="selectedBlocks.length == 0">交易选中的格子</button>
           <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == myOwnerId" title="撤销当前选中的交易单">撤销交易单</button>
-          <button type="button" class="btn btn-default" ng-click="addPic()" ng-show="mode == 2" title="添加图片">添加图片</button>
+          <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
+        </div>
+        <div class="btn-group" role="group" aria-label="..." ng-show="mode == 2">
+          <button type="button" class="btn btn-default" ng-click="addPic()">添加图片</button>
+          <button type="button" class="btn btn-default" ng-click="assembleImage()" ng-disabled="!newImage">确定图片位置</button>
           <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
         </div>
       </div>
     </div>
-    <div class="btn-group" role="group" aria-label="..." ng-hide="mode != 0 || !account">
+    <div class="btn-group" role="group" aria-label="..." ng-show="mode == 0 && account">
       <button type="button" class="btn btn-default" ng-click="startOrder(0)">
         <i class="fa fa-th" aria-hidden="true"></i>
         求购
@@ -27,6 +31,9 @@
         <i class="fa fa-cog" aria-hidden="true"></i>
         我的格子
       </button>
+    </div>
+    <div ng-show="account">
+        <small>当前星云账户: {{account}}</small>
     </div>
     <div ng-hide="account">
         如需交易请安装 <a target="_blank" href="https://github.com/ChengOrangeJu/WebExtensionWallet">WebExtensionWallet</a> 并导入星云钱包。
@@ -131,3 +138,4 @@
 <div style="display: none">
   <input id="image-input" type="file"></file>
 </div>
+<canvas id="assemble"></canvas>

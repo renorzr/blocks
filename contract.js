@@ -2,10 +2,6 @@
 
 module.exports = (function () {
     var NAS = new BigNumber("1e18");
-    var IMG = 'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png';
-    var ZERO = 'AAA';
-    var HREF = 'https://www.google.com/';
-    var HINT = 'for sale';
     var WIDTH = 100;
     var HEIGHT = 100;
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
@@ -47,7 +43,6 @@ module.exports = (function () {
             this.orders = {};
             this.author = Blockchain.transaction.from;
             var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
-            this._configure(this.author, {img: IMG, offset: ZERO, href: HREF, hint: HINT});
             this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
             owner.assets = TOTAL_BLOCKS;
         },
