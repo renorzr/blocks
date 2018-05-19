@@ -1,10 +1,9 @@
 var MODE_NORMAL = 0;
 var MODE_TRADE = 1;
 var MODE_SETUP = 2;
-var CHAR_CODE_OF_A = 'A'.charCodeAt();
-var BASE = 26;
 var BK_SIZE = 10; // block size in pixels
 var ROW_BLOCK_NUM = 100; // how many blocks in one row (the same in one column)
+var CANVAS_SIZE = BK_SIZE * ROW_BLOCK_NUM;
 var TOTAL_BLOCKS = ROW_BLOCK_NUM ** 2;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
 var BASE_URL = 'https://testnet.nebulas.io';
@@ -54,6 +53,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.ctx = canvas.getContext('2d');
     $scope.ctxTop = canvasTop.getContext('2d');
     $scope.orderPrice = 0.1;
+    $scope.changedSettings = {};
 
     $scope.$on('$viewContentLoaded', function(){
         window.postMessage({
@@ -83,6 +83,39 @@ blocksApp.controller('homeController', function($scope, $http) {
             }
         });
     });
+
+    $scope.loadCard = function (e) {
+        var currentBlock = getBlockByPos(e.offsetX, e.offsetY);
+        if ($scope.lastBlock !== currentBlock) {
+            $scope.lastBlock = currentBlock;
+            if ($scope.cardTimer) {
+                clearTimeout($scope.cardTimer);
+                $scope.cardTimer = null;
+                $('#card').fadeOut();
+            }
+            $scope.cardTimer = setTimeout(function(){$scope.showCard(currentBlock)}, 1500);
+        }
+    }
+
+    $scope.loadHref = function(e) {
+        var currentBlock = getBlockByPos(e.offsetX, e.offsetY);
+        if ($scope.lastBlock !== currentBlock) {
+            $scope.lastBlock = currentBlock;
+            var data = $scope.overallData;
+            var owner = $scope.getOwnerOfBlock(currentBlock);
+            if (owner) {
+                var href = owner.href;
+                var title = owner.title;
+                if (href) {
+                    $('#mainLink').attr("href", href);
+                    $('#mainLink').attr("title", title);
+                } else {
+                    $('#mainLink').attr("href", "");
+                    $('#mainLink').attr("title", title);
+                }
+            }
+        }
+    }
 
     $scope.mousedown = function(e) {
         $scope.drag = {
@@ -189,6 +222,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.exitTrade = function () {
+        $scope.restoreOwner();
         $scope.resetTradeBlocks();
     }
 
@@ -223,6 +257,23 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.orderTotalPrice = function () {
         return $scope.selectedBlocks.length * $scope.orderPrice;
     }
+
+    $scope.setLink = function () {
+        $('#linkModal').modal();
+        var owner = $scope.getOwner();
+        $scope.linkSettings = {
+            href: owner.href,
+            title: owner.title
+        }
+    }
+
+    $scope.saveLinkSettings = function () {
+        var owner = $scope.getOwner();
+        owner.href = $scope.changedSettings.href = $scope.linkSettings.href;
+        owner.title = $scope.changedSettings.title = $scope.linkSettings.title;
+        $('#linkModal').modal('hide');
+    }
+
 
     $scope.trade = function () {
         var order = $scope.tradingOrder;
@@ -281,10 +332,9 @@ blocksApp.controller('homeController', function($scope, $http) {
         }
         ctx.globalAlpha = 0.8;
         for (var blockId in $scope.blockStatus) {
-            var row = Math.floor(blockId / ROW_BLOCK_NUM);
-            var col = blockId % ROW_BLOCK_NUM;
-            var x = Math.round(col * BK_SIZE);
-            var y = Math.round(row * BK_SIZE);
+            var pos = blockPos(blockId);
+            var x = pos.x;
+            var y = pos.y;
             var blockStatus = $scope.blockStatus[blockId];
             ctx.strokeStyle = "#a0a0a0";
             ctx.strokeRect(x, y, BK_SIZE, BK_SIZE);
@@ -350,6 +400,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.setup = function () {
+        $scope.backupOwner();
         $scope.resetTradeBlocks();
         $scope.mode = MODE_SETUP;
         $scope.selectable = false;
@@ -367,9 +418,13 @@ blocksApp.controller('homeController', function($scope, $http) {
         $('#image-input').change(function() {loadImg($scope)});
     }
 
+    $scope.getOwner = function() {
+        return $scope.overallData.owners[$scope.myOwnerId];
+    }
+
     $scope.assembleImage = function () {
         if ($scope.newImage) {
-            var owner = $scope.overallData.owners[$scope.myOwnerId];
+            var owner = $scope.getOwner();
             var img = $scope.newImage;
             var blocks = $scope.overallData.blocks;
             var leftMostCol = ROW_BLOCK_NUM;
@@ -399,11 +454,10 @@ blocksApp.controller('homeController', function($scope, $http) {
             for (var blockId in blocks) {
                 var ownerId = blocks[blockId];
                 if (ownerId === $scope.myOwnerId) {
-                    var row = Math.floor(blockId / ROW_BLOCK_NUM);
-                    var col = blockId % ROW_BLOCK_NUM;
                     var ownerId = blocks[blockId];
-                    var x = Math.round(col * BK_SIZE);
-                    var y = Math.round(row * BK_SIZE);
+                    var pos = blockPos(blockId);
+                    var x = pos.x;
+                    var y = pos.y;
                     var clipX = Math.round(x - $scope.newImageX);
                     var clipY = Math.round(y - $scope.newImageY);
                     if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
@@ -415,12 +469,56 @@ blocksApp.controller('homeController', function($scope, $http) {
             }
             var blockOffset = topMostRow * ROW_BLOCK_NUM + leftMostCol;
             owner.offset = stringifyBlocks([blockOffset]);
-            owner.img = assembleCanvas.toDataURL();
+            owner.img = assembleCanvas.toDataURL('image/webp');
+            console.log('img len=', owner.img.length);
+            $scope.changedSettings.img = owner.img;
+            $scope.changedSettings.offset = owner.offset;
 
+            owner.loaded = false;
             $scope.newImage = null;
             render($scope.ctx, $scope.overallData);
             $scope.invalidate();
         }
+    }
+
+    $scope.cancelAddPic = function() {
+        $scope.newImage = null;
+        $scope.invalidate();
+    }
+
+    $scope.save = function () {
+        callContract(0, "configure", $scope.changedSettings);
+    }
+
+    $scope.backupOwner = function () {
+        $scope.ownerBackup = $.extend({}, $scope.getOwner());
+    }
+
+    $scope.restoreOwner = function () {
+        if ($scope.ownerBackup) {
+            $scope.overallData.owners[$scope.myOwnerId] = $scope.ownerBackup;
+        }
+    }
+
+    $scope.showCard = function (blockId) {
+        var owner = $scope.getOwnerOfBlock(blockId);
+        var pos = blockPos(blockId);
+        var card = $('#card');
+        var width = card.width();
+        var height = card.height();
+        var canvasPos = getPos($scope.canvas);
+        var x = pos.x - width / 2;
+        var y = pos.y - height / 2;
+        if (x < 0) x = 0;
+        if (x > CANVAS_SIZE - width) x = CANVAS_SIZE - width;
+        if (y < 0) y = 0;
+        if (y > CANVAS_SIZE - height) y = CANVAS_SIZE - height;
+        card.css('left', canvasPos[0] + x).css('top', canvasPos[1] + y).fadeIn();
+    }
+
+    $scope.getOwnerOfBlock = function (blockId) {
+        var data = $scope.overallData;
+        return data && data.owners[data.blocks[blockId]];
     }
 });
 
@@ -430,49 +528,28 @@ blocksApp.controller('aboutController', function($scope) {
 blocksApp.controller('assetsController', function($scope) {
 });
 
-function parseBlocks(blocks) {
-    var result = [];
-    for (var i = 0; i < blocks.length; i+=3) {
-        var n = 0;
-        var base = 1;
-        for (var j = 0; j < 3; j++) {
-            var d = blocks.charCodeAt(i + j) - CHAR_CODE_OF_A;
-            n += d * base;
-            base *= BASE;
-        }
-        result.push(n);
-    }
-    return result;
-}
-
-function stringifyBlocks(blocks) {
-   var result = '';
-   blocks.forEach(function(blockId){
-       var n = blockId;
-       for (var i = 0; i < 3; i++) {
-           result += String.fromCharCode(n % BASE + CHAR_CODE_OF_A);
-           n = Math.floor(n / BASE);
-       }
-   });
-   return result;
+function callContract(value, method) {
+    var args = Array.prototype.slice.call(arguments, 2);
+    var nebpay = new NebPay();
+    nebpay.call(CONTRACT_ADDRESS, value, method, JSON.stringify(args), { listener: txCallback(scope) });
 }
 
 function render(ctx, data) {
     for (var ownerId in data.owners) {
         var owner = data.owners[ownerId];
-        console.log('owner[' + ownerId + ']=', owner);
         if (!owner.img) continue;
+        console.log('render', typeof(owner.img), owner.img.length, owner.img.width);
         var img = new Image();
         img.src = owner.img;
         owner.img = img;
         var offsetBlock = owner.offset ? parseBlocks(owner.offset)[0] : 0;
-        var offsetRow = Math.floor(offsetBlock / ROW_BLOCK_NUM);
-        var offsetCol = offsetBlock % ROW_BLOCK_NUM;
-        owner.offsetX = Math.round(offsetCol * BK_SIZE);
-        owner.offsetY = Math.round(offsetRow * BK_SIZE);
-        img.setAttribute('crossOrigin', 'anonymous');
+        var pos = blockPos(offsetBlock);
+        owner.offsetX = pos.x;
+        owner.offsetY = pos.y;
+        console.log('owner.loaded=', owner.loaded);
         img.onload = (function(owner) {
             return function() {
+                console.log('owner img loaded');
                 owner.loaded = true;
             }
         })(owner);
@@ -496,14 +573,22 @@ function renderBlock(ctx, owner, blockId, offsetX, offsetY) {
     if (!offsetX) offsetX = 0;
     if (!offsetY) offsetY = 0;
     var img = owner.img;
+    var pos = blockPos(blockId);
+    var clipX = Math.round(pos.x - owner.offsetX);
+    var clipY = Math.round(pos.y - owner.offsetY);
+    if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
+        ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, pos.x + offsetX, pos.y + offsetY, BK_SIZE, BK_SIZE);
+    }
+}
+
+function blockPos(blockId) {
     var row = Math.floor(blockId / ROW_BLOCK_NUM);
     var col = blockId % ROW_BLOCK_NUM;
-    var x = Math.round(col * BK_SIZE);
-    var y = Math.round(row * BK_SIZE);
-    var clipX = Math.round(x - owner.offsetX);
-    var clipY = Math.round(y - owner.offsetY);
-    if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
-        ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x + offsetX, y + offsetY, BK_SIZE, BK_SIZE);
+    return {
+        row: row,
+        col: col,
+        x: Math.round(col * BK_SIZE),
+        y: Math.round(row * BK_SIZE)
     }
 }
 
@@ -545,8 +630,25 @@ function loadImg(scope){
         scope.newImage = img;
         img.onload = function () {
             scope.invalidate();
+            setTimeout(function(){scope.$apply();}, 10);
         }
     };
 
     reader.readAsDataURL(file);
 }
+
+$(window).scroll(function (e) {
+    var toolbar = $('#toolbar');
+    var isPositionFixed = (toolbar.css('position') == 'fixed');
+    var scrollBottom = $(this).scrollTop() + window.innerHeight;
+    if (!isPositionFixed) {
+        var toolbarTop = getPos(toolbar[0])[1];
+        if (scrollBottom < toolbarTop + toolbar.height()) {
+            toolbar.attr('originTop', toolbarTop);
+            toolbar.css({'position': 'fixed', 'bottom': '0px'});
+        }
+    } else if (scrollBottom > parseInt(toolbar.attr('originTop')) + toolbar.height()) {
+        toolbar.css({'position': '', 'bottom': ''});
+    }
+});
+

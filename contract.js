@@ -7,8 +7,6 @@ module.exports = (function () {
     var TOTAL_BLOCKS = WIDTH * HEIGHT;
     var FEE_RATE = new BigNumber("0.01");
     var FEE_LEAST = NAS.mul(0.1);
-    var CHAR_CODE_OF_A = 65;
-    var BASE = 26;
     var BUY = 0;
     var SELL = 1;
     var DEFAULT_LIMIT = [0, TOTAL_BLOCKS];
@@ -87,7 +85,7 @@ module.exports = (function () {
                 throw new Error('ILLEGAL_PRICE');
             }
 
-            blocks = this._parseBlocks(blocks);
+            blocks = parseBlocks(blocks);
             if (blocks.length === 0) {
                 throw new Error('EMPTY_ORDER');
             }
@@ -161,7 +159,7 @@ module.exports = (function () {
             }
             var opponent = this.ownerIds.get(order.creator);
     
-            blocks = this._parseBlocks(blocks);
+            blocks = parseBlocks(blocks);
             var blockCount = blocks.length;
             var limit = order.limit || DEFAULT_LIMIT;
             if (blockCount < limit[0] || blockCount > limit[1]) {
@@ -230,7 +228,7 @@ module.exports = (function () {
         _removeOrderBlocks: function (order, blocks, checkRange) {
             // remove sold blocks from order.blocks
             var blocksInOrderStatus = {};
-            var blocksInOrder = this._parseBlocks(order.blocks);
+            var blocksInOrder = parseBlocks(order.blocks);
             blocksInOrder.forEach(function(blockId){
                 blocksInOrderStatus[blockId] = true;
             });
@@ -246,7 +244,7 @@ module.exports = (function () {
             });
             var orders = this.orders;
             if (blocksInOrder.length > 0) {
-                order.blocks = this._stringifyBlocks(blocksInOrder);
+                order.blocks = stringifyBlocks(blocksInOrder);
                 orders[order.id] = order;
             } else {
                 delete(orders[order.id]);
@@ -282,33 +280,6 @@ module.exports = (function () {
             });
         },
 
-        _parseBlocks: function (blocks) {
-            var result = [];
-            for (var i = 0; i < blocks.length; i+=3) {
-                var n = 0;
-                var base = 1;
-                for (var j = 0; j < 3; j++) {
-                    var d = blocks.charCodeAt(i + j) - CHAR_CODE_OF_A;
-                    n += d * base;
-                    base *= BASE;
-                }
-                result.push(n);
-            }
-            return result;
-        },
-
-        _stringifyBlocks: function (blocks) {
-           var result = '';
-           blocks.forEach(function(blockId){
-               var n = blockId;
-               for (var i = 0; i < 3; i++) {
-                   result += String.fromCharCode(n % BASE + CHAR_CODE_OF_A);
-                   n = Math.floor(n / BASE);
-               }
-           });
-           return result;
-        },
-    
         _getOwnerById: function (ownerId) {
             return this.owners.get(this.ownerIds.get(ownerId));
         },
@@ -333,7 +304,7 @@ module.exports = (function () {
         _createOrder: function (newOrder) {
             // check duplication
             var blockInNewOrder = {};
-            this._parseBlocks(newOrder.blocks).forEach(function (blockId) {
+            parseBlocks(newOrder.blocks).forEach(function (blockId) {
                 blockInNewOrder[blockId] = true;
             });
 
@@ -342,7 +313,7 @@ module.exports = (function () {
             for (var orderId in orders) {
                 var order = orders[orderId];
                 if (order.direction === newOrder.direction && order.creator === newOrder.creator) {
-                    this._parseBlocks(order.blocks).forEach(function (blockId) {
+                    parseBlocks(order.blocks).forEach(function (blockId) {
                         if (blockInNewOrder[blockId]) {
                             throw new Error('DUP_ORDER_BLOCK');
                         }
@@ -362,17 +333,10 @@ module.exports = (function () {
                 throw new Error('OWN_NOTHING');
             }
     
-            if (config.img !== undefined) {
-                owner.img = config.img;
-            }
-            if (config.offset !== undefined) {
-                owner.offset = config.offset;
-            }
-            if (config.href !== undefined) {
-                owner.href = config.href;
-            }
-            if (config.hint !== undefined) {
-                owner.hint = config.hint;
+            for (var k in config) {
+                if (k != 'id' && k != 'asset' && k != 'loaded') {
+                    owner[k] = config[k];
+                }
             }
     
             this.owners.set(account, owner);

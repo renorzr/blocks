@@ -1,22 +1,10 @@
-<div class="jumbotron text-center">
+<div class="text-center">
 	<p>优质展示位，永久产权，自由转让交易</p>
-    <canvas id="canvas" width="1000" height="1000" crossOrigin="Anonymous"></canvas>
-    <div ng-show="mode != 0">
-      <canvas id="canvasTop" width="1000" height="1000" style="position:absolute;top:{{canvasPos[1]}}px;left:{{canvasPos[0]}}px;z-index:99" onmousedown="scope.mousedown(event)" onmouseup="scope.mouseup(event)" onmousemove="scope.mousemove(event)"></canvas>
-      <div class="row">
-        <div class="btn-group" role="group" aria-label="..." ng-show="mode == 1">
-          <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable">取消选取</button>
-          <button type="button" class="btn btn-default" ng-click="confirmOrder()" ng-show="mode == 1 && !tradingOrder" ng-disabled="selectedBlocks.length == 0">{{orderDirection ? '出售' : '求购'}}选中的格子</button>
-          <button type="button" class="btn btn-default" ng-click="confirmTrade()" ng-show="selectable && tradingOrder" title="执行当前选中的交易单" ng-disabled="selectedBlocks.length == 0">交易选中的格子</button>
-          <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == myOwnerId" title="撤销当前选中的交易单">撤销交易单</button>
-          <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
-        </div>
-        <div class="btn-group" role="group" aria-label="..." ng-show="mode == 2">
-          <button type="button" class="btn btn-default" ng-click="addPic()">添加图片</button>
-          <button type="button" class="btn btn-default" ng-click="assembleImage()" ng-disabled="!newImage">确定图片位置</button>
-          <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
-        </div>
-      </div>
+    <div class="row">
+        <a id="mainLink" href="http://www.baidu.com" target="_blank" onmousemove="scope.loadCard(event)" onmouseout="scope.cardTimer && clearTimeout(scope.cardTimer)">
+            <canvas id="canvas" width="1000" height="1000" style="-webkit-box-shadow: 0px 0px 25px #ccc;"></canvas>
+        </a>
+    <canvas ng-show="mode" id="canvasTop" width="1000" height="1000" style="position:absolute;top:{{canvasPos[1]}}px;left:{{canvasPos[0]}}px;z-index:1" onmousedown="scope.mousedown(event)" onmouseup="scope.mouseup(event)" onmousemove="scope.mousemove(event)"></canvas>
     </div>
     <div class="btn-group" role="group" aria-label="..." ng-show="mode == 0 && account">
       <button type="button" class="btn btn-default" ng-click="startOrder(0)">
@@ -31,6 +19,27 @@
         <i class="fa fa-cog" aria-hidden="true"></i>
         我的格子
       </button>
+    </div>
+    <div id="toolbar" style="z-index:2;width:100%;">
+      <div ng-show="mode != 0">
+        <div class="row">
+          <div class="btn-group" role="group" aria-label="..." ng-show="mode == 1">
+            <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable">取消选取</button>
+            <button type="button" class="btn btn-default" ng-click="confirmOrder()" ng-show="mode == 1 && !tradingOrder" ng-disabled="selectedBlocks.length == 0">{{orderDirection ? '出售' : '求购'}}选中的格子</button>
+            <button type="button" class="btn btn-default" ng-click="confirmTrade()" ng-show="selectable && tradingOrder" title="执行当前选中的交易单" ng-disabled="selectedBlocks.length == 0">交易选中的格子</button>
+            <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == myOwnerId" title="撤销当前选中的交易单">撤销交易单</button>
+            <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
+          </div>
+          <div class="btn-group" role="group" aria-label="..." ng-show="mode == 2">
+            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="setLink()">设置内容</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="addPic()">添加图片</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="save()">保存</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="exitTrade()">退出</button>
+            <button type="button" class="btn btn-default" ng-show="newImage" ng-click="assembleImage()">放置图片</button>
+            <button type="button" class="btn btn-default" ng-show="newImage" ng-click="cancelAddPic()">取消添加图片</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div ng-show="account">
         <small>当前星云账户: {{account}}</small>
@@ -135,7 +144,37 @@
   </div>
 </div>
 
+<div class="modal fade" id="linkModal" tabindex="-1" role="dialog" aria-labelledby="linkModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="linkModalLabel">设置内容</h4>
+      </div>
+      <div class="modal-body">
+        <p>链接地址 <input ng-model="linkSettings.href" placeholder="http://..."></input></p>
+        <p>标题文字 <input ng-model="linkSettings.title" placeholder="标题文字"></input></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" ng-click="saveLinkSettings()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="card" class="thumbnail" style="position:absolute;width:252px;height:407px">
+  <div style="background-image:url(http://img5.imgtn.bdimg.com/it/u=908790920,3018055197&fm=27&gp=0.jpg);width:242px;height:150px"/>
+  <div class="caption">
+    <h3></h3>
+    <p>Cras justo odio, dapibus ac facilisis in, egestas eget quam. Donec id elit non mi porta gravida at eget metus. Nullam id dolor id nibh ultricies vehicula ut id elit.</p>
+    <div style="text-align: center">
+        <a href="#" class="btn btn-primary" role="button">前往</a>
+    </div>
+  </div>
+</div>
+
 <div style="display: none">
   <input id="image-input" type="file"></file>
+  <canvas id="assemble"></canvas>
 </div>
-<canvas id="assemble"></canvas>
