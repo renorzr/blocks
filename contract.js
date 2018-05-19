@@ -2,27 +2,23 @@
 
 module.exports = (function () {
     var NAS = new BigNumber("1e18");
-    var WIDTH = 100;
-    var HEIGHT = 100;
-    var TOTAL_BLOCKS = WIDTH * HEIGHT;
-    var FEE_RATE = new BigNumber("0.01");
-    var FEE_LEAST = NAS.mul(0.1);
-    var BUY = 0;
-    var SELL = 1;
+    var FEE_RATE = new BigNumber("0.03");
+    var FEE_LEAST = NAS.mul('0.1');
     var DEFAULT_LIMIT = [0, TOTAL_BLOCKS];
     
     var BlocksContract = function () {
         LocalContractStorage.defineProperties(this, {
             author: null,
-            nextOwnerId: null,
+            nextDistrictId: null,
             nextOrderId: null,
             orders: null,
             blocks: null
         });
     
         LocalContractStorage.defineMapProperties(this, {
-            owners: null,
-            ownerIds: null,
+            districts: null,
+            districtIds: null,
+            subs: null,
             orderBalances: {
                 stringify: function(value) {
                     return value.toString();
@@ -36,33 +32,35 @@ module.exports = (function () {
     
     BlocksContract.prototype = {
         init: function () {
-            this.nextOwnerId = 0;
+            this.nextDistrictId = 0;
             this.nextOrderId = 0;
             this.orders = {};
             this.author = Blockchain.transaction.from;
-            var owner = this._addOwner(this.author, {assets: TOTAL_BLOCKS});
-            this.blocks = Array(TOTAL_BLOCKS).fill(owner.id);
-            owner.assets = TOTAL_BLOCKS;
+            var district = this._addDistrict(this.author);
+            this.blocks = Array(TOTAL_BLOCKS).fill(district._id);
         },
     
         get: function () {
-            var owners = {};
+            var districts = {};
             var _this = this;
-            this.blocks.forEach(function(ownerId){
-                if (!(ownerId in owners)) {
-                    owners[ownerId] = _this._getOwnerById(ownerId);
+            this.blocks.forEach(function(districtId){
+                if (!(districtId in districts)) {
+                    districts[districtId] = _this._getDistrictById(districtId);
                 }
             })
             return {
-                owners: owners,
+                districts: districts,
                 blocks: this.blocks
             }
         },
 
         mine: function () {
-            return this.owners.get(Blockchain.transaction.from);
+            var account = Blockchain.transaction.from;
+            var result = this.districts.get(account);
+            result.subs = this.subs.get(account);
+            return result;
         },
-    
+
         /**
          * create a order
          * direction: 0-buy 1-sell
@@ -74,7 +72,7 @@ module.exports = (function () {
             var from = Blockchain.transaction.from;
 
             var order = {
-                creator: this._getOrCreateOwner(from).id,
+                creator: this._getOrCreateDistrict(from)._id,
                 direction: direction,
                 price: price,
                 blocks: blocks,
@@ -91,11 +89,8 @@ module.exports = (function () {
             }
 
             if (direction === SELL) {
-                var owner = this.owners.get(from);
-                if (!(owner && owner.assets)) {
-                    throw new Error('NOTHING_TO_SELL');
-                }
-                this._checkOwnership(owner.id, blocks);
+                var district = this.districts.get(from);
+                this._ensureBlocksInDistrict(district._id, blocks);
                 return this._createOrder(order);
             } else if (direction === BUY) {
                 var paying = Blockchain.transaction.value;
@@ -103,7 +98,7 @@ module.exports = (function () {
                 var overpay = paying.minus(totalPrice);
                 if (overpay.gt(0)) {
                     // return overpay
-                    this._transferNas(from, overpay);
+                    _transferNas(from, overpay);
                 } else if (overpay.lt(0)) {
                     throw new Error('INSUFFICIENT_MONEY');
                 }
@@ -113,7 +108,7 @@ module.exports = (function () {
                     }
                 });
                 var newOrder = this._createOrder(order);
-                this.orderBalances.set(newOrder.id, totalPrice);
+                this.orderBalances.set(newOrder._id, totalPrice);
                 return newOrder;
             } else {
                 throw new Error("UNKNOWN_DIRECTION:" + direction);
@@ -125,13 +120,13 @@ module.exports = (function () {
          */
         cancel: function (orderId) {
             var from = Blockchain.transaction.from;
-            var owner = this.owners.get(from);
-            if (!(owner && this.orders[orderId].creator === owner.id)) {
+            var district = this.districts.get(from);
+            if (!(district && this.orders[orderId].creator === district._id)) {
                 throw new Error('WRONG_ORDER_OWNERSHIP');
             }
             var balance = this.orderBalances.get(orderId);
             if (balance && balance.gt(0)) {
-                this._transferNas(from, balance);
+                _transferNas(from, balance);
             }
             this.orderBalances.del(orderId);
             var orders = this.orders;
@@ -157,7 +152,7 @@ module.exports = (function () {
             if (!(order && order.blocks && order.direction === direction)) {
                 throw new Error('ORDER_UNAVAILABLE');
             }
-            var opponent = this.ownerIds.get(order.creator);
+            var opponent = this.districtIds.get(order.creator);
     
             blocks = parseBlocks(blocks);
             var blockCount = blocks.length;
@@ -173,7 +168,7 @@ module.exports = (function () {
                 fee = FEE_LEAST;
             }
             // money to author
-            this._transferNas(this.author, fee);
+            _transferNas(this.author, fee);
 
             if (direction === BUY) {
                 // i'm selling because the order is BUY
@@ -187,16 +182,16 @@ module.exports = (function () {
                 this.orderBalances.set(orderId, balance);
 
                 // money to seller (me)
-                this._transferNas(from, totalPrice.minus(fee));
+                _transferNas(from, totalPrice.minus(fee));
                 // blocks to buyer (opponent)
                 this._transferBlocks(from, opponent, blocks);
 
                 // remove blocks from my sell order
-                var ownerId = this.owners.get(from).id;
+                var districtId = this.districts.get(from)._id;
                 var orders = this.orders;
                 for (var orderId in orders) {
                     var order = orders[orderId];
-                    if (order.direction === SELL && order.creator === ownerId) {
+                    if (order.direction === SELL && order.creator === districtId) {
                         this._removeOrderBlocks(order, blocks, false);
                         break;
                     }
@@ -205,7 +200,7 @@ module.exports = (function () {
                 // i'm buying because the order is SELL
 
                 // money to seller (opponent)
-                this._transferNas(opponent, totalPrice);
+                _transferNas(opponent, totalPrice);
                 // blocks to buyer (me)
                 this._transferBlocks(opponent, from, blocks);
 
@@ -214,12 +209,44 @@ module.exports = (function () {
                 var overpay = paying.minus(totalPay);
                 if (overpay.gt(0)) {
                     // return overpay
-                    this._transferNas(from, overpay);
+                    _transferNas(from, overpay);
                 } else if (overpay.lt(0)) {
                     throw new Error('INSUFFICIENT_MONEY');
                 }
             }
             this._removeOrderBlocks(order, blocks, true);
+        },
+    
+        configure: function(config) {
+            this._configure(Blockchain.transaction.from, config);
+        },
+
+        transferBlocks: function(fromDistName, toDistName, blockString) {
+            var account = Blockchain.transaction.from;
+            var blocks = parseBlocks(blockString);
+            var fromDistFullName = _districtFullName(account, fromDistName);
+            this._transferBlocks(
+                fromDistFullName,
+                _districtFullName(account, toDistName),
+                blocks 
+            );
+            if (fromDistName) {
+                // transferring from a sub district
+                var subDist = this.districts.get(fromDistFullName);
+                if (this.blocks.indexOf(subDist._id) == -1) {
+                    var mainDist = this.districts.get(account);
+                    this.sub.del(fromDistName);
+                    this.districts.set(account, mainDist);
+                    this.districtIds.del(subDist._id);
+                    this.districts.del(fromDistFullName);
+                }
+            } else {
+                // transferring from a main district
+                var mainDistId = this._getOrCreateDistrict(account)._id;
+                ensureBlocksNotLockedByOrders(blocks, this.orders, function(order) {
+                    return order.direction === SELL && order.creator === mainDistId;
+                });
+            }
         },
 
         /*
@@ -245,120 +272,126 @@ module.exports = (function () {
             var orders = this.orders;
             if (blocksInOrder.length > 0) {
                 order.blocks = stringifyBlocks(blocksInOrder);
-                orders[order.id] = order;
+                orders[order._id] = order;
             } else {
-                delete(orders[order.id]);
+                delete(orders[order._id]);
             }
             this.orders = orders;
         },
     
-        configure: function(config) {
-            this._configure(Blockchain.transaction.from, config);
-        },
-
-        withdraw: function(amount) {
-            _transferNas(this.author, new BigNumber(amount));
-        },
-
-        _transferNas: function(to, amount) {
-            Blockchain.transfer(to, amount);
-            Event.Trigger("Blocks", {
-                Transfer: {
-                    from: Blockchain.transaction.to,
-                    to: to,
-                    value: amount.toString()
-                }
-            });
-        },
-    
-        _checkOwnership: function (ownerId, blocks) {
+        _ensureBlocksInDistrict: function (districtId, blocks) {
             var _this = this;
             blocks.forEach(function (blockId) {
-                if (_this.blocks[blockId] !== ownerId) {
-                    throw new Error('WRONG_OWNERSHIP:' + blockId);
+                if (_this.blocks[blockId] !== districtId) {
+                    throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
                 }
             });
         },
 
-        _getOwnerById: function (ownerId) {
-            return this.owners.get(this.ownerIds.get(ownerId));
+        _getDistrictById: function (districtId) {
+            return this.districts.get(this.districtIds.get(districtId));
         },
 
-        _getOrCreateOwner: function(account) {
-            var owner = this.owners.get(account);
-            if (!owner) {
-                return this._addOwner(account);
+        _getOrCreateDistrict: function(districtName) {
+            var district = this.districts.get(districtName);
+            if (!district) {
+                return this._addDistrict(districtName);
             }
-            return owner;
+            return district;
         },
     
-        _addOwner: function (account, data) {
-            var ownerId = this.nextOwnerId++;
-            var owner = data || {assets: 0};
-            owner.id = ownerId;
-            this.ownerIds.set(ownerId, account);
-            this.owners.set(account, owner);
-            return owner;
+        _addDistrict: function (districtName, data) {
+            var districtId = this.nextDistrictId++;
+            var district = {};
+            district._id = districtId;
+            this.districtIds.set(districtId, districtName);
+            this.districts.set(districtName, district);
+            var chunks = districtName.split(':');
+            if (chunks.length > 1) {
+                var mainName = chunks[0];
+                var subName = chunks[1];
+                var subs = this.subs.get(mainName) || {};
+                subs[subName] = district._id;
+                this.subs.set(mainName, subs);
+            }
+            return district;
         },
 
         _createOrder: function (newOrder) {
+            var orders = this.orders;
             // check duplication
-            var blockInNewOrder = {};
-            parseBlocks(newOrder.blocks).forEach(function (blockId) {
-                blockInNewOrder[blockId] = true;
+            ensureBlocksNotLockedByOrders(parseBlocks(newOrder.blocks), orders, function(order) {
+                return order.direction === newOrder.direction && order.creator === newOrder.creator;
             });
 
-            var orders = this.orders;
-
-            for (var orderId in orders) {
-                var order = orders[orderId];
-                if (order.direction === newOrder.direction && order.creator === newOrder.creator) {
-                    parseBlocks(order.blocks).forEach(function (blockId) {
-                        if (blockInNewOrder[blockId]) {
-                            throw new Error('DUP_ORDER_BLOCK');
-                        }
-                    });
-                }
-            };
-
-            newOrder.id = this.nextOrderId++;
-            orders[newOrder.id] = newOrder;
+            newOrder._id = this.nextOrderId++;
+            orders[newOrder._id] = newOrder;
             this.orders = orders;
             return newOrder;
         },
     
-        _configure: function(account, config) {
-            var owner = this.owners.get(account);
-            if (!owner) {
+        _configure: function(districtName, config) {
+            var district = this.districts.get(districtName);
+            if (!district) {
                 throw new Error('OWN_NOTHING');
             }
     
             for (var k in config) {
-                if (k != 'id' && k != 'asset' && k != 'loaded') {
-                    owner[k] = config[k];
+                if (!k.startsWith('_')) {
+                    district[k] = config[k];
                 }
             }
     
-            this.owners.set(account, owner);
+            this.districts.set(districtName, district);
         },
     
        _transferBlocks: function (from, to, blocks) {
            var allBlocks = this.blocks;
-           var fromOwner = this.owners.get(from);
-           var toOwner = this._getOrCreateOwner(to);
+           var fromDistrict = this.districts.get(from);
+           var toDistrict = this._getOrCreateDistrict(to);
     
            blocks.forEach(function (blockId) {
-               if (allBlocks[blockId] !== fromOwner.id) {
-                   throw new Error('WRONG_OWNERSHIP:' + blockId);
+               if (allBlocks[blockId] !== fromDistrict._id) {
+                   throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
                }
-               allBlocks[blockId] = toOwner.id;
+               allBlocks[blockId] = toDistrict._id;
            });
            this.blocks = allBlocks;
-           fromOwner.assets -= blocks.length;
-           toOwner.assets += blocks.length;
-           this.owners.set(from, fromOwner);
-           this.owners.set(to, toOwner);
+           this.districts.set(from, fromDistrict);
+           this.districts.set(to, toDistrict);
        }
     }
     return BlocksContract;
+
+    function _districtFullName(account, districtName) {
+        return districtName ? account + ':' + districtName : account;
+    }
+
+    function _transferNas(to, amount) {
+        Blockchain.transfer(to, amount);
+        Event.Trigger("Blocks", {
+            Transfer: {
+                from: Blockchain.transaction.to,
+                to: to,
+                value: amount.toString()
+            }
+        });
+    }
+
+    function ensureBlocksNotLockedByOrders(blocks, orders, filter) {
+        var blockMap = {};
+        blocks.forEach(function(blockId){
+            blockMap[blockId] = true;
+        });
+        for (var orderId in orders) {
+            var order = orders[orderId];
+            if (filter(order)) {
+                parseBlocks(order.blocks).forEach(function (blockId) {
+                    if (blockMap[blockId]) {
+                        throw new Error('ORDER_LOCKED_BLOCK');
+                    }
+                });
+            }
+        };
+    }
 })();

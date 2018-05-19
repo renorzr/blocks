@@ -2,9 +2,7 @@ var MODE_NORMAL = 0;
 var MODE_TRADE = 1;
 var MODE_SETUP = 2;
 var BK_SIZE = 10; // block size in pixels
-var ROW_BLOCK_NUM = 100; // how many blocks in one row (the same in one column)
-var CANVAS_SIZE = BK_SIZE * ROW_BLOCK_NUM;
-var TOTAL_BLOCKS = ROW_BLOCK_NUM ** 2;
+var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
 var BASE_URL = 'https://testnet.nebulas.io';
 var CALL_URL = BASE_URL + '/v1/user/call';
@@ -12,8 +10,7 @@ var CONTRACT_ADDRESS = 'n222gn1FXgJMfBqsQMrCYgED8tKxDQxRnWq';
 var GET_CALL = '{"from":"n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"get","args":"[]"}}';
 var MARKET_CALL = '{"from":"n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"market","args":"[]"}}';
 var RENDER_DURATION = 100;
-var BUY = 0;
-var FEE_RATE = 0.01;
+var FEE_RATE = 0.03;
 var FEE_LEAST = 0.1;
 var NebPay = require("nebpay");
 
@@ -190,7 +187,7 @@ blocksApp.controller('homeController', function($scope, $http) {
         var endRow = Math.floor(bottom / BK_SIZE);
         for (var col = startCol; col <= endCol; col++) {
             for (var row = startRow; row <= endRow; row++) {
-                var blockId = Math.round(row * ROW_BLOCK_NUM + col);
+                var blockId = Math.round(row * EDGE_BLOCK_NUM + col);
                 var blockStatus = $scope.blockStatus[blockId];
                 if (blockStatus.selectable) {
                     blockStatus.selected = true;
@@ -309,7 +306,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     getBlockByPos = function (x, y) {
         var col = Math.floor(x / BK_SIZE);
         var row = Math.floor(y / BK_SIZE);
-        return row * ROW_BLOCK_NUM + col;
+        return row * EDGE_BLOCK_NUM + col;
     }
 
     $scope.invalidate = function() {
@@ -427,16 +424,16 @@ blocksApp.controller('homeController', function($scope, $http) {
             var owner = $scope.getOwner();
             var img = $scope.newImage;
             var blocks = $scope.overallData.blocks;
-            var leftMostCol = ROW_BLOCK_NUM;
+            var leftMostCol = EDGE_BLOCK_NUM;
             var rightMostCol = 0;
-            var topMostRow = ROW_BLOCK_NUM;
+            var topMostRow = EDGE_BLOCK_NUM;
             var bottomMostRow = 0;
 
             for (var blockId in blocks) {
                 var ownerId = blocks[blockId];
                 if (ownerId === $scope.myOwnerId) {
-                    var row = Math.floor(blockId / ROW_BLOCK_NUM);
-                    var col = blockId % ROW_BLOCK_NUM;
+                    var row = Math.floor(blockId / EDGE_BLOCK_NUM);
+                    var col = blockId % EDGE_BLOCK_NUM;
                     leftMostCol = Math.min(leftMostCol, col);
                     rightMostCol = Math.max(rightMostCol, col);
                     topMostRow = Math.min(topMostRow, row);
@@ -467,7 +464,7 @@ blocksApp.controller('homeController', function($scope, $http) {
                     }
                 }
             }
-            var blockOffset = topMostRow * ROW_BLOCK_NUM + leftMostCol;
+            var blockOffset = topMostRow * EDGE_BLOCK_NUM + leftMostCol;
             owner.offset = stringifyBlocks([blockOffset]);
             owner.img = assembleCanvas.toDataURL('image/webp');
             console.log('img len=', owner.img.length);
@@ -582,8 +579,8 @@ function renderBlock(ctx, owner, blockId, offsetX, offsetY) {
 }
 
 function blockPos(blockId) {
-    var row = Math.floor(blockId / ROW_BLOCK_NUM);
-    var col = blockId % ROW_BLOCK_NUM;
+    var row = Math.floor(blockId / EDGE_BLOCK_NUM);
+    var col = blockId % EDGE_BLOCK_NUM;
     return {
         row: row,
         col: col,
