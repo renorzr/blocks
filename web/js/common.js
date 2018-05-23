@@ -4,6 +4,7 @@ var BUY = 0;
 var SELL = 1;
 var BASE = 26;
 var CHAR_CODE_OF_A = 65;
+var LOWEST_PRICE = 0.01;
 
 
 function parseBlocks(blocks) {

@@ -3,7 +3,7 @@
 module.exports = (function () {
     var NAS = new BigNumber("1e18");
     var FEE_RATE = new BigNumber("0.03");
-    var FEE_LEAST = NAS.mul('0.1');
+    var FEE_LOWEST= NAS.mul('0.1');
     var DEFAULT_LIMIT = [0, TOTAL_BLOCKS];
     
     var BlocksContract = function () {
@@ -12,7 +12,8 @@ module.exports = (function () {
             nextDistrictId: null,
             nextOrderId: null,
             orders: null,
-            blocks: null
+            blocks: null,
+            lastPrice: null
         });
     
         LocalContractStorage.defineMapProperties(this, {
@@ -82,10 +83,11 @@ module.exports = (function () {
                 direction: direction,
                 price: price,
                 blocks: blocks,
-                limit: limit
+                limit: limit,
+                createdAt: Date.now()
             }
 
-            if (price < 0.1) {
+            if (price < LOWEST_PRICE) {
                 throw new Error('ILLEGAL_PRICE');
             }
 
@@ -148,8 +150,27 @@ module.exports = (function () {
         /**
          * market: list all orders
          */
-        market: function (){
-            return this.orders;
+        market: function (filter, endId, limit){
+            if (!filter) filter = {};
+            var id = endId === undefined ? this.nextOrderId  - 1 : endId;
+            limit = limit || 100;
+            var result = [];
+            while (id >= 0 && result.length < limit) {
+                var order = this.orders[id--];
+                if (order
+                    && (filter.direction == null || filter.direction === order.direction)
+                    && (filter.price_gt == null || order.price > filter.price_gt)
+                    && (filter.price_lt == null || order.price < filter.price_lt)
+                    && (filter.price_gte == null || order.price >= filter.price_gte)
+                    && (filter.price_lte == null || order.price <= filter.price_lte)
+                ) {
+                    result.push(order);
+                }
+            }
+            return {
+                orders: result,
+                lastPrice: this.lastPrice
+            };
         },
     
         /**
@@ -175,8 +196,8 @@ module.exports = (function () {
             var from = Blockchain.transaction.from;
             var totalPrice = NAS.mul(order.price).mul(blockCount);
             var fee = totalPrice.mul(FEE_RATE);
-            if (fee.lt(FEE_LEAST)) {
-                fee = FEE_LEAST;
+            if (fee.lt(FEE_LOWEST)) {
+                fee = FEE_LOWEST;
             }
             // money to author
             _transferNas(this.author, fee);
@@ -225,6 +246,7 @@ module.exports = (function () {
                     throw new Error('INSUFFICIENT_MONEY');
                 }
             }
+            this.lastPrice = order.price;
             this._removeOrderBlocks(order, blocks, true);
         },
     
@@ -257,6 +279,12 @@ module.exports = (function () {
         },
 
         rating: function (districtId, rating, comment) {
+            if (rating < 0.5 || rating > 5) {
+                throw new Error('WRONG_RATING');
+            }
+            if (comment.length > 200) {
+                throw new Error('TOO_LONG_CONTENT');
+            }
             var donate = Blockchain.transaction.value.div(NAS);
             var districtFullName = this.districtIds.get(districtId);
             var to = districtFullName.split(':')[0];
@@ -270,7 +298,7 @@ module.exports = (function () {
             });
             this.districtRatings.set(districtId, ratings);
             if (donate.gt(0)) {
-                this._transferNas(to, donate);
+                _transferNas(to, donate);
             }
         },
 

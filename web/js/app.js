@@ -8,7 +8,7 @@ var blocksApp = angular.module('blocksApp', ['ngRoute']);
 var NET = "testnet";
 var BASE_URL = 'https://' + NET + '.nebulas.io';
 var CALL_URL = BASE_URL + '/v1/user/call';
-var CONTRACT_ADDRESS = 'n1p6TBsRVnbaHFP1oXgEE3ojXobzCdaWH6p';
+var CONTRACT_ADDRESS = 'n1zq8XuGi58fTaLxvgCmsvpGwRtVD21kE3x';
 var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
 var RENDER_DURATION = 100;
 var FEE_RATE = 0.03;
@@ -38,7 +38,7 @@ blocksApp.config(function($routeProvider) {
 blocksApp.controller('mainController', function($scope) {
 });
 
-blocksApp.controller('homeController', function($scope, $http) {
+blocksApp.controller('homeController', function($scope, $http, $location) {
     $('#card').hide();
     window.scope = $scope;
     $scope.blockStatus = [];
@@ -53,7 +53,9 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.ctxTop = canvasTop.getContext('2d');
     $scope.orderPrice = 0.1;
     $scope.changedSettings = {};
-    $scope.net = NET;
+    console.log('location', $location.search());
+    $scope.net = $location.search().nasnet || 'mainnet';
+    $scope.callUrl = 'https://' + $scope.net + '.nebulas.io/v1/user/call';
 
     $scope.$on('$viewContentLoaded', function(){
         window.postMessage({
@@ -109,16 +111,8 @@ blocksApp.controller('homeController', function($scope, $http) {
             render($scope.ctx, $scope.overallData);
         });
 
-        $scope.call("market", function(orders){
-            $scope.orders = [];
-            for (var orderId in orders) {
-                var order = orders[orderId];
-                order.blocks = parseBlocks(order.blocks);
-                if (!order.limit) {
-                    order.limit = [1, order.blocks.length];
-                }
-                $scope.orders.push(order);
-            }
+        $scope.call("market", function(market){
+            $scope.orders = market.orders;
         });
     });
 
@@ -137,7 +131,7 @@ blocksApp.controller('homeController', function($scope, $http) {
                 args: JSON.stringify(args)
             }
         };
-        $http.post(CALL_URL, JSON.stringify(request)).then(function(r){
+        $http.post($scope.callUrl, JSON.stringify(request)).then(function(r){
             cb(JSON.parse(r.data.result.result));
         });
     }
@@ -264,7 +258,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.getOrderById = function (orderId) {
         for (var i in $scope.orders) {
             var order = $scope.orders[i];
-            if (order._id === orderId) {
+            if (order && order._id === orderId) {
                 return order;
             }
         }
@@ -345,6 +339,10 @@ blocksApp.controller('homeController', function($scope, $http) {
             $scope.blockStatus[blockId].selectable = (sell && isMine) || (!sell && !isMine);
         };
         $scope.selectNone();
+    }
+
+    $scope.validOrderPrice = function () {
+        return $scope.orderPrice >= LOWEST_PRICE;
     }
 
     $scope.isMyBlock = function (districtId) {
@@ -591,6 +589,7 @@ blocksApp.controller('homeController', function($scope, $http) {
 
     $scope.showCard = function (blockId) {
         $scope.showingDistrict = $scope.getDistrictOfBlock(blockId);
+        if (!$scope.showingDistrict) return;
         var pos = blockPos(blockId);
         var card = $('#card');
         var width = card.width();
@@ -608,14 +607,17 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.loadRatings = function (districtId) {
+        $scope.loadingRatings = true;
         $scope.call("ratings", districtId, Date.now() - MONTH, function (ratings) {
             var district = $scope.overallData.districts[districtId]
             district.ratings = ratings;
             var sum = 0;
             for (var i in ratings) {
-                sum += ratings[i].rating;
+                sum += parseInt(ratings[i].rating);
             }
+            console.log('loadRatings', ratings.length, sum);
             $scope.rate = ratings.length < 10 ? 0 : Math.floor(sum / ratings.length);
+            $scope.loadingRatings = false;
         });
     }
 
@@ -624,6 +626,9 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.startRating = function () {
+        $scope.toDonate = false;
+        $scope.currentRate = 0;
+        $scope.comment = null;
         $('#ratingModal').modal();
     }
 
@@ -631,7 +636,7 @@ blocksApp.controller('homeController', function($scope, $http) {
         callContract(
             $scope.toDonate ? 0.1 : 0,
             "rating",
-            $scope.currentDistrictId,
+            $scope.showingDistrict._id,
             $scope.currentRate,
             $scope.comment
         );
