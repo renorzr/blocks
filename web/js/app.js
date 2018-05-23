@@ -1,14 +1,15 @@
+var MONTH = 30 * 24 * 3600 * 1000;
 var MODE_NORMAL = 0;
 var MODE_TRADE = 1;
 var MODE_SETUP = 2;
 var BK_SIZE = 10; // block size in pixels
 var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
-var BASE_URL = 'https://testnet.nebulas.io';
+var NET = "testnet";
+var BASE_URL = 'https://' + NET + '.nebulas.io';
 var CALL_URL = BASE_URL + '/v1/user/call';
-var CONTRACT_ADDRESS = 'n222gn1FXgJMfBqsQMrCYgED8tKxDQxRnWq';
-var GET_CALL = '{"from":"n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"get","args":"[]"}}';
-var MARKET_CALL = '{"from":"n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"market","args":"[]"}}';
+var CONTRACT_ADDRESS = 'n1p6TBsRVnbaHFP1oXgEE3ojXobzCdaWH6p';
+var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
 var RENDER_DURATION = 100;
 var FEE_RATE = 0.03;
 var FEE_LEAST = 0.1;
@@ -38,6 +39,7 @@ blocksApp.controller('mainController', function($scope) {
 });
 
 blocksApp.controller('homeController', function($scope, $http) {
+    $('#card').hide();
     window.scope = $scope;
     $scope.blockStatus = [];
     for (var i = 0; i < TOTAL_BLOCKS; i++) {
@@ -51,6 +53,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.ctxTop = canvasTop.getContext('2d');
     $scope.orderPrice = 0.1;
     $scope.changedSettings = {};
+    $scope.net = NET;
 
     $scope.$on('$viewContentLoaded', function(){
         window.postMessage({
@@ -62,13 +65,51 @@ blocksApp.controller('homeController', function($scope, $http) {
 
         $scope.canvasPos = getPos($scope.canvas);
 
-        $http.post(CALL_URL, GET_CALL).then(function(r){
-            $scope.overallData = JSON.parse(r.data.result.result);
+        $scope.call("get", function(data) {
+            $scope.overallData = data;
+            for (var districtId in data.districts) {
+                var district = data.districts[districtId];
+                district.loading = true;
+                district.load = (function (district) {
+                    function loadDistrictImage(district) {
+                        console.log('loadDistrictImage', district);
+                        var img = new Image();
+                        img.src = district.config.img;
+                        district.img = img;
+                        img.onload = (function (district) {
+                            return function () {
+                                district.loaded = true;
+                                district.loading = false;
+                            }
+                        })(district);
+                        var offsetBlock = district.config.offset ? parseBlocks(district.config.offset)[0] : 0;
+                        var pos = blockPos(offsetBlock);
+                        district.offsetX = pos.x;
+                        district.offsetY = pos.y;
+                    }
+                    return function () {
+                        district.loaded = false;
+                        district.loading = true;
+                        if (district.config && district.config.img) {
+                            console.log('config', district);
+                            loadDistrictImage(district);
+                        } else {
+                            $scope.call("getConfig", district._id, function(data){
+                                district.config = data || {};
+                                if (district.config.img) {
+                                    loadDistrictImage(district);
+                                } else {
+                                    district.loading = false;
+                                }
+                            });
+                        }
+                    };
+                })(district);
+            }
             render($scope.ctx, $scope.overallData);
         });
 
-        $http.post(CALL_URL, MARKET_CALL).then(function(r){
-            var orders = JSON.parse(r.data.result.result);
+        $scope.call("market", function(orders){
             $scope.orders = [];
             for (var orderId in orders) {
                 var order = orders[orderId];
@@ -81,17 +122,29 @@ blocksApp.controller('homeController', function($scope, $http) {
         });
     });
 
+    $scope.call = function (method) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        var cb = args.pop();
+        var request = {
+            from: $scope.account || AUTHOR_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            value: "0",
+            nonce: 0,
+            gasPrice: "1000000",
+            gasLimit: "200000",
+            contract:{
+                function: method,
+                args: JSON.stringify(args)
+            }
+        };
+        $http.post(CALL_URL, JSON.stringify(request)).then(function(r){
+            cb(JSON.parse(r.data.result.result));
+        });
+    }
+
     $scope.loadCard = function (e) {
         var currentBlock = getBlockByPos(e.offsetX, e.offsetY);
-        if ($scope.lastBlock !== currentBlock) {
-            $scope.lastBlock = currentBlock;
-            if ($scope.cardTimer) {
-                clearTimeout($scope.cardTimer);
-                $scope.cardTimer = null;
-                $('#card').fadeOut();
-            }
-            $scope.cardTimer = setTimeout(function(){$scope.showCard(currentBlock)}, 1500);
-        }
+        $scope.showCard(currentBlock)
     }
 
     $scope.loadHref = function(e) {
@@ -99,10 +152,10 @@ blocksApp.controller('homeController', function($scope, $http) {
         if ($scope.lastBlock !== currentBlock) {
             $scope.lastBlock = currentBlock;
             var data = $scope.overallData;
-            var owner = $scope.getOwnerOfBlock(currentBlock);
-            if (owner) {
-                var href = owner.href;
-                var title = owner.title;
+            var district = $scope.getDistrictOfBlock(currentBlock);
+            if (district) {
+                var href = district.href;
+                var title = district.title;
                 if (href) {
                     $('#mainLink').attr("href", href);
                     $('#mainLink').attr("title", title);
@@ -140,6 +193,9 @@ blocksApp.controller('homeController', function($scope, $http) {
             $scope.newImageX += $scope.drag.dX;
             $scope.newImageY += $scope.drag.dY;
         }
+        if ($scope.selectable) {
+            $scope.selectRectBlocks();
+        }
         $scope.updateSelectedBlocks();
         $scope.drag = null;
         $scope.invalidate();
@@ -161,9 +217,6 @@ blocksApp.controller('homeController', function($scope, $http) {
         var currentBlock = getBlockByPos(x, y);
         if ($scope.lastBlock !== currentBlock) {
             $scope.lastBlock = currentBlock;
-            if ($scope.selectable) {
-                $scope.selectRectBlocks();
-            }
         }
     }
 
@@ -201,7 +254,7 @@ blocksApp.controller('homeController', function($scope, $http) {
         $scope.resetTradeBlocks();
         $scope.mode = MODE_TRADE;
         $scope.tradingOrder = $scope.getOrderById(orderId);
-        $scope.selectable = $scope.tradingOrder.creator != $scope.myOwnerId;
+        $scope.selectable = $scope.tradingOrder.creator != $scope.mainDistrictId;
         $scope.tradingOrder.blocks.forEach(function(blockId){
             $scope.blockStatus[blockId].selectable = true;
         });
@@ -211,7 +264,7 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.getOrderById = function (orderId) {
         for (var i in $scope.orders) {
             var order = $scope.orders[i];
-            if (order.id === orderId) {
+            if (order._id === orderId) {
                 return order;
             }
         }
@@ -219,12 +272,11 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.exitTrade = function () {
-        $scope.restoreOwner();
+        $scope.restoreDistrict();
         $scope.resetTradeBlocks();
     }
 
     $scope.resetTradeBlocks = function () {
-        console.log('reset trade blocks');
         $scope.mode = MODE_NORMAL;
         $scope.tradingOrder = null;
         $scope.newImage = $scope.newImageX = $scope.newImageY = null;
@@ -252,22 +304,20 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.orderTotalPrice = function () {
-        return $scope.selectedBlocks.length * $scope.orderPrice;
+        return $scope.selectedBlocks && $scope.selectedBlocks.length * $scope.orderPrice;
     }
 
     $scope.setLink = function () {
         $('#linkModal').modal();
-        var owner = $scope.getOwner();
-        $scope.linkSettings = {
-            href: owner.href,
-            title: owner.title
-        }
+        var district = $scope.getCurrentDistrict();
+        $scope.linkSettings = district.config;
+        console.log($scope.linkSettings);
     }
 
     $scope.saveLinkSettings = function () {
-        var owner = $scope.getOwner();
-        owner.href = $scope.changedSettings.href = $scope.linkSettings.href;
-        owner.title = $scope.changedSettings.title = $scope.linkSettings.title;
+        var district = $scope.getCurrentDistrict();
+        district.config.href = $scope.changedSettings.href = $scope.linkSettings.href;
+        district.config.title = $scope.changedSettings.title = $scope.linkSettings.title;
         $('#linkModal').modal('hide');
     }
 
@@ -277,7 +327,7 @@ blocksApp.controller('homeController', function($scope, $http) {
         var nebpay = new NebPay();
         var blocks = stringifyBlocks($scope.selectedBlocks);
         var pay = order.direction ? $scope.pay : 0;
-        var args = JSON.stringify([order.direction, order.id, blocks]);
+        var args = JSON.stringify([order.direction, order._id, blocks]);
         nebpay.call(CONTRACT_ADDRESS, pay.toFixed(5), "trade", args, { listener: txCallback(scope) });
     }
 
@@ -290,16 +340,20 @@ blocksApp.controller('homeController', function($scope, $http) {
         $scope.selectable = true;
         var blocks = $scope.overallData.blocks;
         for (var blockId in blocks) {
-            var ownerId = blocks[blockId];
-            var isMine = ownerId === $scope.myOwnerId;
+            var districtId = blocks[blockId];
+            var isMine = $scope.isMyBlock(districtId);
             $scope.blockStatus[blockId].selectable = (sell && isMine) || (!sell && !isMine);
         };
         $scope.selectNone();
     }
 
+    $scope.isMyBlock = function (districtId) {
+        return $scope.districts.hasOwnProperty(districtId);
+    }
+
     $scope.cancelOrder = function () {
         var nebpay = new NebPay();
-        var args = JSON.stringify([$scope.tradingOrder.id]);
+        var args = JSON.stringify([$scope.tradingOrder._id]);
         nebpay.call(CONTRACT_ADDRESS, 0, "cancel", args, { listener: txCallback(scope) });
     }
 
@@ -314,9 +368,6 @@ blocksApp.controller('homeController', function($scope, $http) {
         var ctx = $scope.ctxTop;
         $scope.clear();
         ctx.globalAlpha = 1;
-        if ($scope.selectable && drag) {
-            ctx.strokeRect(drag.startX, drag.startY, drag.dX, drag.dY);
-        }
         if ($scope.newImage) {
             var img = $scope.newImage;
             var x = $scope.newImageX;
@@ -327,7 +378,7 @@ blocksApp.controller('homeController', function($scope, $http) {
             }
             ctx.drawImage(img, x, y);
         }
-        ctx.globalAlpha = 0.8;
+        ctx.globalAlpha = 0.7;
         for (var blockId in $scope.blockStatus) {
             var pos = blockPos(blockId);
             var x = pos.x;
@@ -351,6 +402,9 @@ blocksApp.controller('homeController', function($scope, $http) {
                 ctx.strokeRect(x, y, BK_SIZE, BK_SIZE);
             }
         };
+        if ($scope.selectable && drag) {
+            ctx.strokeRect(drag.startX, drag.startY, drag.dX, drag.dY);
+        }
     }
 
     $scope.clear = function () {
@@ -365,20 +419,24 @@ blocksApp.controller('homeController', function($scope, $http) {
     $scope.createOrder = function () {
         var blocks = stringifyBlocks($scope.selectedBlocks);
         var limit = [$scope.minBlocks, $scope.maxBlocks];
-        var nebpay = new NebPay();
-        var args = JSON.stringify([$scope.orderDirection, parseFloat($scope.orderPrice), blocks, limit]);
         var value = $scope.orderDirection ? 0 : $scope.orderTotalPrice().toFixed(5);
-        nebpay.call(CONTRACT_ADDRESS, value, "order", args, { listener: txCallback(scope) });
+        callContract(value, "order", $scope.orderDirection, parseFloat($scope.orderPrice), blocks, limit);
     }
 
     $scope.onNebMessage = function (data) {
         if (data.account) {
             console.log('account', data.account);
             $scope.account = data.account;
-            var mineCall = '{"from":"' + $scope.account + '","to":"' + CONTRACT_ADDRESS + '","value":"0","nonce":0,"gasPrice":"1000000","gasLimit":"200000","contract":{"function":"mine","args":"[]"}}';
-            $http.post(CALL_URL, mineCall).then(function(r){
-                var data = JSON.parse(r.data.result.result);
-                $scope.myOwnerId = data.id;
+            $scope.call("mine", function(data) {
+                console.log('data=', data);
+                $scope.currentDistrictId = $scope.mainDistrictId = data._id;
+                $scope.subs = data._subs;
+                $scope.districts = {};
+                $scope.districts[data._id] = null;
+                for (var name in data._subs) {
+                    $scope.districts[data._subs[name]] = name;
+                }
+                $scope.mineLoaded = true;
             });
         }
         if(data.txhash) {
@@ -392,22 +450,53 @@ blocksApp.controller('homeController', function($scope, $http) {
         }
     }
 
+    $scope.changeDistrict = function (distId) {
+        $scope.currentDistrictId = parseInt(distId);
+        $scope.setup();
+    }
+
     $scope.closeTxModal = function () {
         window.location.reload();
     }
 
     $scope.setup = function () {
-        $scope.backupOwner();
+        $scope.backupDistrict();
         $scope.resetTradeBlocks();
         $scope.mode = MODE_SETUP;
+        $scope.transferringBlocks = false;
         $scope.selectable = false;
         var blocks = $scope.overallData.blocks;
         for (var blockId in blocks) {
-            var ownerId = blocks[blockId];
-            var isMine = ownerId === $scope.myOwnerId;
-            $scope.blockStatus[blockId].highlight = isMine;
+            var districtId = blocks[blockId];
+            var isCurrentDistrict = districtId === $scope.currentDistrictId;
+            $scope.blockStatus[blockId].highlight = isCurrentDistrict;
         };
         $scope.selectNone();
+    }
+
+    $scope.startTransferBlocks = function () {
+        $scope.transferringBlocks = true;
+        $scope.selectable = true;
+        var blocks = $scope.overallData.blocks;
+        for (var blockId in blocks) {
+            var districtId = blocks[blockId];
+            var isCurrentDistrict = districtId === $scope.currentDistrictId;
+            $scope.blockStatus[blockId].selectable = isCurrentDistrict;
+        };
+        $scope.selectNone();
+    }
+
+    $scope.transferBlocks = function (districtName) {
+        var blocks = stringifyBlocks($scope.selectedBlocks);
+        callContract(0, "transferBlocks",
+            $scope.districts[$scope.currentDistrictId], districtName, blocks);
+    }
+
+    $scope.transferBlocksToNewDistrict = function () {
+        var districtName = prompt("子区域名称");
+        if (districtName) {
+            return $scope.transferBlocks(districtName);
+        }
     }
 
     $scope.addPic = function () {
@@ -415,13 +504,13 @@ blocksApp.controller('homeController', function($scope, $http) {
         $('#image-input').change(function() {loadImg($scope)});
     }
 
-    $scope.getOwner = function() {
-        return $scope.overallData.owners[$scope.myOwnerId];
+    $scope.getCurrentDistrict = function() {
+        return $scope.overallData.districts[$scope.currentDistrictId];
     }
 
     $scope.assembleImage = function () {
         if ($scope.newImage) {
-            var owner = $scope.getOwner();
+            var district = $scope.getCurrentDistrict();
             var img = $scope.newImage;
             var blocks = $scope.overallData.blocks;
             var leftMostCol = EDGE_BLOCK_NUM;
@@ -429,9 +518,10 @@ blocksApp.controller('homeController', function($scope, $http) {
             var topMostRow = EDGE_BLOCK_NUM;
             var bottomMostRow = 0;
 
+            // find out bounding rect
             for (var blockId in blocks) {
-                var ownerId = blocks[blockId];
-                if (ownerId === $scope.myOwnerId) {
+                var districtId = blocks[blockId];
+                if (districtId === $scope.currentDistrictId) {
                     var row = Math.floor(blockId / EDGE_BLOCK_NUM);
                     var col = blockId % EDGE_BLOCK_NUM;
                     leftMostCol = Math.min(leftMostCol, col);
@@ -448,10 +538,11 @@ blocksApp.controller('homeController', function($scope, $http) {
             assembleCanvas.height = (bottomMostRow - topMostRow + 1) * BK_SIZE;
             var ctx = assembleCanvas.getContext('2d');
 
+            // render to assembleCanvas
             for (var blockId in blocks) {
-                var ownerId = blocks[blockId];
-                if (ownerId === $scope.myOwnerId) {
-                    var ownerId = blocks[blockId];
+                var districtId = blocks[blockId];
+                if (districtId === $scope.currentDistrictId) {
+                    var districtId = blocks[blockId];
                     var pos = blockPos(blockId);
                     var x = pos.x;
                     var y = pos.y;
@@ -460,18 +551,19 @@ blocksApp.controller('homeController', function($scope, $http) {
                     if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
                         ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, x - leftMost, y - topMost, BK_SIZE, BK_SIZE);
                     } else {
-                        renderBlock(ctx, owner, blockId, -leftMost, -topMost);
+                        renderBlock(ctx, district, blockId, -leftMost, -topMost);
                     }
                 }
             }
             var blockOffset = topMostRow * EDGE_BLOCK_NUM + leftMostCol;
-            owner.offset = stringifyBlocks([blockOffset]);
-            owner.img = assembleCanvas.toDataURL('image/webp');
-            console.log('img len=', owner.img.length);
-            $scope.changedSettings.img = owner.img;
-            $scope.changedSettings.offset = owner.offset;
+            if (!district.config) district.config = {};
+            district.config.offset = stringifyBlocks([blockOffset]);
+            district.config.img = assembleCanvas.toDataURL('image/webp');
+            $scope.changedSettings.img = district.config.img;
+            $scope.changedSettings.offset = district.config.offset;
 
-            owner.loaded = false;
+            district.loaded = false;
+            district.loading = true;
             $scope.newImage = null;
             render($scope.ctx, $scope.overallData);
             $scope.invalidate();
@@ -484,21 +576,21 @@ blocksApp.controller('homeController', function($scope, $http) {
     }
 
     $scope.save = function () {
-        callContract(0, "configure", $scope.changedSettings);
+        callContract(0, "configure", $scope.districts[$scope.currentDistrictId], $scope.changedSettings);
     }
 
-    $scope.backupOwner = function () {
-        $scope.ownerBackup = $.extend({}, $scope.getOwner());
+    $scope.backupDistrict = function () {
+        $scope.districtBackup = $.extend({}, $scope.getCurrentDistrict());
     }
 
-    $scope.restoreOwner = function () {
-        if ($scope.ownerBackup) {
-            $scope.overallData.owners[$scope.myOwnerId] = $scope.ownerBackup;
+    $scope.restoreDistrict = function () {
+        if ($scope.districtBackup) {
+            $scope.overallData.districts[$scope.currentDistrictId] = $scope.districtBackup;
         }
     }
 
     $scope.showCard = function (blockId) {
-        var owner = $scope.getOwnerOfBlock(blockId);
+        $scope.showingDistrict = $scope.getDistrictOfBlock(blockId);
         var pos = blockPos(blockId);
         var card = $('#card');
         var width = card.width();
@@ -510,12 +602,48 @@ blocksApp.controller('homeController', function($scope, $http) {
         if (x > CANVAS_SIZE - width) x = CANVAS_SIZE - width;
         if (y < 0) y = 0;
         if (y > CANVAS_SIZE - height) y = CANVAS_SIZE - height;
-        card.css('left', canvasPos[0] + x).css('top', canvasPos[1] + y).fadeIn();
+        card.hide().css('left', canvasPos[0] + x).css('top', canvasPos[1] + y).show();
+        $scope.$apply();
+        $scope.loadRatings($scope.showingDistrict._id);
     }
 
-    $scope.getOwnerOfBlock = function (blockId) {
+    $scope.loadRatings = function (districtId) {
+        $scope.call("ratings", districtId, Date.now() - MONTH, function (ratings) {
+            var district = $scope.overallData.districts[districtId]
+            district.ratings = ratings;
+            var sum = 0;
+            for (var i in ratings) {
+                sum += ratings[i].rating;
+            }
+            $scope.rate = ratings.length < 10 ? 0 : Math.floor(sum / ratings.length);
+        });
+    }
+
+    $scope.closeCard = function () {
+        $('#card').hide();
+    }
+
+    $scope.startRating = function () {
+        $('#ratingModal').modal();
+    }
+
+    $scope.rating = function () {
+        callContract(
+            $scope.toDonate ? 0.1 : 0,
+            "rating",
+            $scope.currentDistrictId,
+            $scope.currentRate,
+            $scope.comment
+        );
+    }
+
+    $scope.getDistrictOfBlock = function (blockId) {
         var data = $scope.overallData;
-        return data && data.owners[data.blocks[blockId]];
+        return data && data.districts[data.blocks[blockId]];
+    }
+
+    $scope.short = function (account) {
+        return account.substring(0, 4) + "..." + account.substring(account.length - 4);
     }
 });
 
@@ -532,47 +660,32 @@ function callContract(value, method) {
 }
 
 function render(ctx, data) {
-    for (var ownerId in data.owners) {
-        var owner = data.owners[ownerId];
-        if (!owner.img) continue;
-        console.log('render', typeof(owner.img), owner.img.length, owner.img.width);
-        var img = new Image();
-        img.src = owner.img;
-        owner.img = img;
-        var offsetBlock = owner.offset ? parseBlocks(owner.offset)[0] : 0;
-        var pos = blockPos(offsetBlock);
-        owner.offsetX = pos.x;
-        owner.offsetY = pos.y;
-        console.log('owner.loaded=', owner.loaded);
-        img.onload = (function(owner) {
-            return function() {
-                console.log('owner img loaded');
-                owner.loaded = true;
-            }
-        })(owner);
+    for (var districtId in data.districts) {
+        var district = data.districts[districtId];
+        district.load();
     }
     for (var i = 0; i < data.blocks.length; i++) {
-        var ownerId = data.blocks[i];
-        var owner = data.owners[ownerId];
-        renderOnLoad(ctx, owner, i);
+        var districtId = data.blocks[i];
+        var district = data.districts[districtId];
+        renderOnLoad(ctx, district, i);
     }
 }
 
-function renderOnLoad(ctx, owner, blockId) {
-    if (owner.loaded) {
-        renderBlock(ctx, owner, blockId);
-    } else {
-        setTimeout(function(){renderOnLoad(ctx, owner, blockId)}, Math.random() * RENDER_DURATION);
+function renderOnLoad(ctx, district, blockId) {
+    if (district.loaded) {
+        renderBlock(ctx, district, blockId);
+    } else if (district.loading) {
+        setTimeout(function(){renderOnLoad(ctx, district, blockId)}, Math.random() * RENDER_DURATION);
     }
 }
 
-function renderBlock(ctx, owner, blockId, offsetX, offsetY) {
+function renderBlock(ctx, district, blockId, offsetX, offsetY) {
     if (!offsetX) offsetX = 0;
     if (!offsetY) offsetY = 0;
-    var img = owner.img;
+    var img = district.img;
     var pos = blockPos(blockId);
-    var clipX = Math.round(pos.x - owner.offsetX);
-    var clipY = Math.round(pos.y - owner.offsetY);
+    var clipX = Math.round(pos.x - district.offsetX);
+    var clipY = Math.round(pos.y - district.offsetY);
     if (clipX > -BK_SIZE && clipY > -BK_SIZE && clipX < img.width && clipY < img.height) {
         ctx.drawImage(img, clipX, clipY, BK_SIZE, BK_SIZE, pos.x + offsetX, pos.y + offsetY, BK_SIZE, BK_SIZE);
     }
@@ -640,9 +753,9 @@ $(window).scroll(function (e) {
     var scrollBottom = $(this).scrollTop() + window.innerHeight;
     if (!isPositionFixed) {
         var toolbarTop = getPos(toolbar[0])[1];
-        if (scrollBottom < toolbarTop + toolbar.height()) {
+        if (scrollBottom < toolbarTop + toolbar.height() + 20) {
             toolbar.attr('originTop', toolbarTop);
-            toolbar.css({'position': 'fixed', 'bottom': '0px'});
+            toolbar.css({'position': 'fixed', 'bottom': '20px'});
         }
     } else if (scrollBottom > parseInt(toolbar.attr('originTop')) + toolbar.height()) {
         toolbar.css({'position': '', 'bottom': ''});

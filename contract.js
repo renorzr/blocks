@@ -16,9 +16,11 @@ module.exports = (function () {
         });
     
         LocalContractStorage.defineMapProperties(this, {
-            districts: null,
-            districtIds: null,
-            subs: null,
+            config: null,       // districtId: {img: ...}
+            districts: null,    // districtId: {_id: districtId, _subs:{}} 
+            districtIds: null,  // districtId: districtName
+            subs: null,         // account: {subDistName: subDistId}
+            districtRatings: null, // districtId: [{comment: '...', rating: 4, donate: 0.1}]
             orderBalances: {
                 stringify: function(value) {
                     return value.toString();
@@ -54,10 +56,14 @@ module.exports = (function () {
             }
         },
 
+        getConfig: function (districtId) {
+            return this.config.get(districtId);
+        },
+
         mine: function () {
             var account = Blockchain.transaction.from;
-            var result = this.districts.get(account);
-            result.subs = this.subs.get(account);
+            var result = this.districts.get(account) || {};
+            result._subs = this.subs.get(account);
             return result;
         },
 
@@ -90,7 +96,12 @@ module.exports = (function () {
 
             if (direction === SELL) {
                 var district = this.districts.get(from);
-                this._ensureBlocksInDistrict(district._id, blocks);
+                var subs = this.subs.get(from);
+                var districtIds = [district._id];
+                for (var k in subs) {
+                    districtIds.push(subs[k]);
+                }
+                this._ensureBlocksInDistricts(districtIds, blocks);
                 return this._createOrder(order);
             } else if (direction === BUY) {
                 var paying = Blockchain.transaction.value;
@@ -184,7 +195,7 @@ module.exports = (function () {
                 // money to seller (me)
                 _transferNas(from, totalPrice.minus(fee));
                 // blocks to buyer (opponent)
-                this._transferBlocks(from, opponent, blocks);
+                this._transferBlocks(from, opponent, blocks, true);
 
                 // remove blocks from my sell order
                 var districtId = this.districts.get(from)._id;
@@ -202,7 +213,7 @@ module.exports = (function () {
                 // money to seller (opponent)
                 _transferNas(opponent, totalPrice);
                 // blocks to buyer (me)
-                this._transferBlocks(opponent, from, blocks);
+                this._transferBlocks(opponent, from, blocks, true);
 
                 var paying = Blockchain.transaction.value;
                 var totalPay = totalPrice.plus(fee);
@@ -217,8 +228,8 @@ module.exports = (function () {
             this._removeOrderBlocks(order, blocks, true);
         },
     
-        configure: function(config) {
-            this._configure(Blockchain.transaction.from, config);
+        configure: function(sub, config) {
+            this._configure(_districtFullName(Blockchain.transaction.from, sub), config);
         },
 
         transferBlocks: function(fromDistName, toDistName, blockString) {
@@ -234,19 +245,46 @@ module.exports = (function () {
                 // transferring from a sub district
                 var subDist = this.districts.get(fromDistFullName);
                 if (this.blocks.indexOf(subDist._id) == -1) {
+                    // district has no blocks, remove the sub district
                     var mainDist = this.districts.get(account);
-                    this.sub.del(fromDistName);
+                    this.subs.del(fromDistName);
                     this.districts.set(account, mainDist);
                     this.districtIds.del(subDist._id);
                     this.districts.del(fromDistFullName);
+                    this.config.del(subDist._id);
                 }
-            } else {
-                // transferring from a main district
-                var mainDistId = this._getOrCreateDistrict(account)._id;
-                ensureBlocksNotLockedByOrders(blocks, this.orders, function(order) {
-                    return order.direction === SELL && order.creator === mainDistId;
-                });
             }
+        },
+
+        rating: function (districtId, rating, comment) {
+            var donate = Blockchain.transaction.value.div(NAS);
+            var districtFullName = this.districtIds.get(districtId);
+            var to = districtFullName.split(':')[0];
+            var ratings = this.districtRatings.get(districtId) || [];
+            ratings.push({
+                account: Blockchain.transaction.from,
+                rating: rating,
+                comment: comment,
+                donate: donate,
+                createdAt: Date.now()
+            });
+            this.districtRatings.set(districtId, ratings);
+            if (donate.gt(0)) {
+                this._transferNas(to, donate);
+            }
+        },
+
+        ratings: function (districtId, since) {
+            var ratings = this.districtRatings.get(districtId) || [];
+            var result = [];
+            for (var i = ratings.length - 1; i >= 0; i--) {
+                var rating = ratings[i];
+                if (rating.createdAt < since) {
+                    break;
+                }
+                result.push(rating);
+            }
+            return result;
         },
 
         /*
@@ -279,10 +317,14 @@ module.exports = (function () {
             this.orders = orders;
         },
     
-        _ensureBlocksInDistrict: function (districtId, blocks) {
+        _ensureBlocksInDistricts: function (districtIds, blocks) {
             var _this = this;
+            var districtIdMap = {};
+            districtIds.forEach(function (districtId) {
+                districtIdMap[districtId] = true;
+            });
             blocks.forEach(function (blockId) {
-                if (_this.blocks[blockId] !== districtId) {
+                if (!districtIdMap[_this.blocks[blockId]]) {
                     throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
                 }
             });
@@ -330,36 +372,43 @@ module.exports = (function () {
             return newOrder;
         },
     
-        _configure: function(districtName, config) {
+        _configure: function(districtName, update) {
             var district = this.districts.get(districtName);
             if (!district) {
                 throw new Error('OWN_NOTHING');
             }
+            var config = this.config.get(district._id) || {};
     
-            for (var k in config) {
-                if (!k.startsWith('_')) {
-                    district[k] = config[k];
+            for (var k in update) {
+                config[k] = update[k];
+            }
+    
+            this.config.set(district._id, config);
+        },
+    
+        _transferBlocks: function (from, to, blocks, withSubs) {
+            var allBlocks = this.blocks;
+            var fromDistrict = this.districts.get(from);
+            var toDistrict = this._getOrCreateDistrict(to);
+
+            var allowedDistricts = {};
+            allowedDistricts[fromDistrict._id] = true;
+            if (withSubs) {
+                var subs = this.subs.get(from);
+                for (var distName in subs) {
+                    var distId = subs[distName];
+                    allowedDistricts[distId] = true;
                 }
             }
     
-            this.districts.set(districtName, district);
-        },
-    
-       _transferBlocks: function (from, to, blocks) {
-           var allBlocks = this.blocks;
-           var fromDistrict = this.districts.get(from);
-           var toDistrict = this._getOrCreateDistrict(to);
-    
-           blocks.forEach(function (blockId) {
-               if (allBlocks[blockId] !== fromDistrict._id) {
-                   throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
-               }
-               allBlocks[blockId] = toDistrict._id;
-           });
-           this.blocks = allBlocks;
-           this.districts.set(from, fromDistrict);
-           this.districts.set(to, toDistrict);
-       }
+            blocks.forEach(function (blockId) {
+                if (!allowedDistricts[allBlocks[blockId]]) {
+                    throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
+                }
+                allBlocks[blockId] = toDistrict._id;
+            });
+            this.blocks = allBlocks;
+        }
     }
     return BlocksContract;
 

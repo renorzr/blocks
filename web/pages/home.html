@@ -1,9 +1,7 @@
 <div class="text-center">
 	<p>优质展示位，永久产权，自由转让交易</p>
-    <div class="row">
-        <a id="mainLink" href="http://www.baidu.com" target="_blank" onmousemove="scope.loadCard(event)" onmouseout="scope.cardTimer && clearTimeout(scope.cardTimer)">
-            <canvas id="canvas" width="1000" height="1000" style="-webkit-box-shadow: 0px 0px 25px #ccc;"></canvas>
-        </a>
+    <div class="row" style="margin-bottom: 20px">
+      <canvas id="canvas" width="1000" height="1000" style="-webkit-box-shadow: 0px 0px 25px #ccc;" onmouseup="scope.loadCard(event)"></canvas>
     <canvas ng-show="mode" id="canvasTop" width="1000" height="1000" style="position:absolute;top:{{canvasPos[1]}}px;left:{{canvasPos[0]}}px;z-index:1" onmousedown="scope.mousedown(event)" onmouseup="scope.mouseup(event)" onmousemove="scope.mousemove(event)"></canvas>
     </div>
     <div class="btn-group" role="group" aria-label="..." ng-show="mode == 0 && account">
@@ -15,7 +13,7 @@
         <i class="fa fa-money" aria-hidden="true"></i>
         出售
       </button>
-      <button type="button" class="btn btn-default" ng-click="setup()">
+      <button type="button" class="btn btn-default" ng-click="setup()" ng-disabled="!mineLoaded">
         <i class="fa fa-cog" aria-hidden="true"></i>
         我的格子
       </button>
@@ -24,19 +22,41 @@
       <div ng-show="mode != 0">
         <div class="row">
           <div class="btn-group" role="group" aria-label="..." ng-show="mode == 1">
-            <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable">取消选取</button>
+            <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="selectable" ng-disabled="selectedBlocks.length == 0">取消选取</button>
             <button type="button" class="btn btn-default" ng-click="confirmOrder()" ng-show="mode == 1 && !tradingOrder" ng-disabled="selectedBlocks.length == 0">{{orderDirection ? '出售' : '求购'}}选中的格子</button>
             <button type="button" class="btn btn-default" ng-click="confirmTrade()" ng-show="selectable && tradingOrder" title="执行当前选中的交易单" ng-disabled="selectedBlocks.length == 0">交易选中的格子</button>
-            <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == myOwnerId" title="撤销当前选中的交易单">撤销交易单</button>
+            <button type="button" class="btn btn-default" ng-click="cancelOrder()" ng-show="tradingOrder && tradingOrder.creator == mainDistrictId" title="撤销当前选中的交易单">撤销交易单</button>
             <button type="button" class="btn btn-default" ng-click="exitTrade()">退出</button>
           </div>
           <div class="btn-group" role="group" aria-label="..." ng-show="mode == 2">
-            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="setLink()">设置内容</button>
-            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="addPic()">添加图片</button>
-            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="save()">保存</button>
-            <button type="button" class="btn btn-default" ng-hide="newImage" ng-click="exitTrade()">退出</button>
-            <button type="button" class="btn btn-default" ng-show="newImage" ng-click="assembleImage()">放置图片</button>
-            <button type="button" class="btn btn-default" ng-show="newImage" ng-click="cancelAddPic()">取消添加图片</button>
+            <div class="btn-group dropup">
+                <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                  区域选择: {{districts[currentDistrictId] || '<主区>'}}<span class="caret"></span>
+              </button>
+              <ul class="dropdown-menu" style="text-align: left">
+                  <li ng-repeat="(distId, distName) in districts" ng-hide="distId == currentDistrictId">
+                      <a href="#" ng-click="changeDistrict(distId)">{{distName || '<主区>'}}
+                  </a></li>
+              </ul>
+            </div>
+            <button type="button" class="btn btn-default" ng-hide="newImage || transferringBlocks" ng-click="startTransferBlocks()" title="分配格子到其它区域">分配格子</button>
+            <div class="btn-group dropup" ng-show="transferringBlocks">
+              <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" ng-disabled="selectedBlocks.length == 0">
+                  分配选定的格子到其它区域<span class="caret"></span>
+              </button>
+              <ul class="dropdown-menu" style="text-align: left">
+                  <li ng-repeat="(distId, distName) in districts" ng-hide="distId == currentDistrictId"><a href="#" ng-click="transferBlocks(distName)">{{distName || '<主区>'}}</a></li>
+                  <li><a href="#" ng-click="transferBlocksToNewDistrict()">&lt;新建区域&gt;</a></li>
+              </ul>
+            </div>
+            <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="transferringBlocks" ng-disabled="selectedBlocks.length == 0">取消选取</button>
+            <button type="button" class="btn btn-default" ng-show="transferringBlocks" ng-click="setup()">退出分配</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage || transferringBlocks" ng-click="setLink()">配置内容</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage || transferringBlocks" ng-click="addPic()">添加图片</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage || transferringBlocks" ng-click="save()">保存</button>
+            <button type="button" class="btn btn-default" ng-hide="newImage || transferringBlocks" ng-click="exitTrade()">退出</button>
+            <button type="button" class="btn btn-default" ng-show="newImage && !transferringBlocks" ng-click="assembleImage()">放置图片</button>
+            <button type="button" class="btn btn-default" ng-show="newImage && !transferringBlocks" ng-click="cancelAddPic()">取消添加图片</button>
           </div>
         </div>
       </div>
@@ -69,8 +89,8 @@
               <td class="text-left">{{order.blocks.length}}</td>
               <td class="text-left">{{order.limit.join(' - ')}}</td>
               <td class="text-left">
-                <a title="查看" href="#" ng-show="account" ng-click="startTrade(order.id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
-                <i class="fa fa-user" title="我的交易单" ng-show="order.creator === myOwnerId"></i>
+                <a title="查看" href="#" ng-show="account" ng-click="startTrade(order._id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
+                <i class="fa fa-user" title="我的交易单" ng-show="order.creator === mainDistrictId"></i>
               </td>
             </tr>
           </tbody>
@@ -135,7 +155,7 @@
         <h4 class="modal-title" id="txModalLabel">操作已发送</h4>
       </div>
       <div class="modal-body">
-          您的操作已发送，交易号为：{{txhash}}
+          您的操作已发送，交易号为：<a target="_blank" href="https://explorer.nebulas.io/#/{{net}}/tx/{{txhash}}">{{txhash}}</a>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-default" ng-click="closeTxModal()">关闭</button>
@@ -163,18 +183,86 @@
   </div>
 </div>
 
-<div id="card" class="thumbnail" style="position:absolute;width:252px;height:407px">
-  <div style="background-image:url(http://img5.imgtn.bdimg.com/it/u=908790920,3018055197&fm=27&gp=0.jpg);width:242px;height:150px"/>
-  <div class="caption">
-    <h3></h3>
-    <p>Cras justo odio, dapibus ac facilisis in, egestas eget quam. Donec id elit non mi porta gravida at eget metus. Nullam id dolor id nibh ultricies vehicula ut id elit.</p>
-    <div style="text-align: center">
-        <a href="#" class="btn btn-primary" role="button">前往</a>
+<div class="modal fade" id="ratingModal" tabindex="-1" role="dialog" aria-labelledby="ratingModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="ratingModalLabel">评价 {{showingDistrict.config.title}}</h4>
+      </div>
+      <div class="modal-body">
+          <form>
+            <div class="form-group">
+              <fieldset class="rating">
+                <input type="radio" id="star5" name="rating" value="5" ng-model="currentRate"/><label class = "full" for="star5"></label>
+                <input type="radio" id="star4half" name="rating" value="4.5" ng-model="currentRate"/><label class="half" for="star4half"></label>
+                <input type="radio" id="star4" name="rating" value="4" ng-model="currentRate"/><label class = "full" for="star4"></label>
+                <input type="radio" id="star3half" name="rating" value="3.5" ng-model="currentRate"/><label class="half" for="star3half"></label>
+                <input type="radio" id="star3" name="rating" value="3" ng-model="currentRate"/><label class = "full" for="star3"></label>
+                <input type="radio" id="star2half" name="rating" value="2.5" ng-model="currentRate"/><label class="half" for="star2half"></label>
+                <input type="radio" id="star2" name="rating" value="2" ng-model="currentRate"/><label class = "full" for="star2"></label>
+                <input type="radio" id="star1half" name="rating" value="1.5" ng-model="currentRate"/><label class="half" for="star1half"></label>
+                <input type="radio" id="star1" name="rating" value="1" ng-model="currentRate"/><label class = "full" for="star1"></label>
+                <input type="radio" id="starhalf" name="rating" value="0.5" ng-model="currentRate"/><label class="half" for="starhalf"></label>
+              </fieldset>
+            </div>
+            <div class="form-group">
+                <textarea class="form-control" ng-model="comment" rows="3" placeholder="评论"></textarea>
+            </div>
+            <div class="checkbox">
+              <label>
+                <input class="span3" type="checkbox" ng-model="toDonate"> 打赏 0.1 NAS </input>
+              </label>
+            </div>
+          </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" ng-click="rating()">确定</button>
+      </div>
     </div>
   </div>
 </div>
 
+<div id="card" class="thumbnail" style="position:absolute;width:260px">
+  <div style="margin: 5px">
+    <h3 ng-show="showDistrict.config.title">{{showingDistrict.config.title}}</h3>
+    <h3 ng-hide="showDistrict.config.title" class="text-muted">未命名</h3>
+    <div>
+      <div class="text-muted" ng-hide="rate > 0">评价过少暂无评分</i>
+      <fieldset class="rating" ng-show="rate > 0">
+        <input type="radio" name="rating" value="5" ng-model="rate" disabled="1"/><label class = "full" for="star5"></label>
+        <input type="radio" name="rating" value="4.5" ng-model="rate" disabled="1" /><label class="half" for="star4half"></label>
+        <input type="radio" name="rating" value="4" ng-model="rate" disabled="1" /><label class = "full" for="star4"></label>
+        <input type="radio" name="rating" value="3.5" ng-model="rate" disabled="1" /><label class="half" for="star3half"></label>
+        <input type="radio" name="rating" value="3" ng-model="rate" disabled="1" /><label class = "full" for="star3"></label>
+        <input type="radio" name="rating" value="2.5" ng-model="rate" disabled="1" /><label class="half" for="star2half"></label>
+        <input type="radio" name="rating" value="2" ng-model="rate" disabled="1" /><label class = "full" for="star2"></label>
+        <input type="radio" name="rating" value="1.5" ng-model="rate" disabled="1" /><label class="half" for="star1half"></label>
+        <input type="radio" name="rating" value="1" ng-model="rate" disabled="1" /><label class = "full" for="star1"></label>
+        <input type="radio" name="rating" value="0.5" ng-model="rate" disabled="1" /><label class="half" for="starhalf"></label>
+      </fieldset>
+    </div>
+    <div style="padding-top:8px;float:right">
+        <a href="#" class="btn btn-default btn-xs" ng-click="startRating()">评分</a>
+    </div>
+  </div>
+  <div style="width:100%;height:180px;overflow:auto;margin:3px">
+    <div ng-repeat="rating in showingDistrict.ratings" style="margin:3px">
+      <div style="float:right"><small>评分: {{rating.rating}}</small></div>
+      <div><small>来自: {{short(rating.account)}}<small></div>
+      <div style="float:right"><small>打赏 {{rating.donate}} NAS <small></div>
+      <div ng-show="rating.comment">{{rating.comment}}</div>
+      <div ng-hide="rating.comment" class="text-muted">无评论</div>
+    </div>
+  </div>
+  <div style="text-align: center; margin: 8px">
+    <a href="{{showingDistrict.config.href}}" target="_blank" class="btn btn-primary" role="button">前往</a>
+    <a href="#" class="btn btn-default" role="button" ng-click="closeCard()">关闭</a>
+  </div>
+</div>
+
 <div style="display: none">
-  <input id="image-input" type="file"></file>
+  <input id="image-input" type="file"></input>
   <canvas id="assemble"></canvas>
 </div>

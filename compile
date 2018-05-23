@@ -1,0 +1,1 @@
+uglifyjs web/js/common.js contract.js
