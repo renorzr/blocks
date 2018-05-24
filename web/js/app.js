@@ -5,9 +5,6 @@ var MODE_SETUP = 2;
 var BK_SIZE = 10; // block size in pixels
 var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
-var NET = "testnet";
-var BASE_URL = 'https://' + NET + '.nebulas.io';
-var CALL_URL = BASE_URL + '/v1/user/call';
 var CONTRACT_ADDRESS = 'n1zq8XuGi58fTaLxvgCmsvpGwRtVD21kE3x';
 var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
 var RENDER_DURATION = 100;
@@ -53,8 +50,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     $scope.ctxTop = canvasTop.getContext('2d');
     $scope.orderPrice = 0.1;
     $scope.changedSettings = {};
-    console.log('location', $location.search());
-    $scope.net = $location.search().nasnet || 'mainnet';
+    $scope.net = $location.host().indexOf('testnet') != -1 ? 'testnet' : 'mainnet';
     $scope.callUrl = 'https://' + $scope.net + '.nebulas.io/v1/user/call';
 
     $scope.$on('$viewContentLoaded', function(){
@@ -249,7 +245,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
         $scope.mode = MODE_TRADE;
         $scope.tradingOrder = $scope.getOrderById(orderId);
         $scope.selectable = $scope.tradingOrder.creator != $scope.mainDistrictId;
-        $scope.tradingOrder.blocks.forEach(function(blockId){
+        parseBlocks($scope.tradingOrder.blocks).forEach(function(blockId){
             $scope.blockStatus[blockId].selectable = true;
         });
         $scope.selectNone();
@@ -590,6 +586,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     $scope.showCard = function (blockId) {
         $scope.showingDistrict = $scope.getDistrictOfBlock(blockId);
         if (!$scope.showingDistrict) return;
+        console.log('showing', $scope.showingDistrict);
         var pos = blockPos(blockId);
         var card = $('#card');
         var width = card.width();

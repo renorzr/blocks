@@ -83,13 +83,14 @@
           </thead>
           <tbody>
               <tr ng-repeat="order in orders | filter: {direction:dir}" ng-class="{'highlight': tradingOrder.id == order.id}">
-              <td class="text-left">{{order.id}}</td>
+              <td class="text-left">{{order._id}}</td>
               <td class="text-left">{{order.price}}</td>
               <td class="text-left">{{order.blocks.length}}</td>
               <td class="text-left">{{order.limit.join(' - ')}}</td>
               <td class="text-left">
                 <a title="查看" href="#" ng-show="account" ng-click="startTrade(order._id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
                 <i class="fa fa-user" title="我的交易单" ng-show="order.creator === mainDistrictId"></i>
+                <a title="创世格子，购买总价全额返还" ng-show="order.creator === 0">创世</a>
               </td>
             </tr>
           </tbody>
@@ -226,11 +227,11 @@
 
 <div id="card" class="thumbnail" style="position:absolute;width:260px">
   <div style="margin: 5px">
-    <h3 ng-show="showDistrict.config.title">{{showingDistrict.config.title}}</h3>
-    <h3 ng-hide="showDistrict.config.title" class="text-muted">未命名</h3>
+    <h3 ng-show="showingDistrict.config.title">{{showingDistrict.config.title}}</h3>
+    <h3 ng-hide="showingDistrict.config.title" class="text-muted">未命名</h3>
     <div>
       <div class="text-muted" ng-hide="rate > 0">评价过少暂无评分
-        <a href="#" class="btn btn-default btn-xs" ng-click="startRating">评价</a>
+        <a href="#" class="btn btn-default btn-xs" ng-click="startRating()">评价</a>
       </div>
       <fieldset class="rating" ng-show="rate > 0" ng-click="startRating()">
         <input type="radio" name="rating" value="5" ng-model="rate" disabled="1"/><label class = "full" for="star5"></label>
