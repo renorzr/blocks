@@ -6,8 +6,8 @@ var BK_SIZE = 10; // block size in pixels
 var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
 var CONTRACT_ADDRESS = {
-    'testnet': 'n1v4WjwgDXNGLNGTjFWAB7rLvrWjM6P99jA',
-    'mainnet': 'n1o7dkFbrGmgFnLB1wKf4YQTGUKKZLAujmz'
+    'testnet': 'n21KiaS89x5wV2mtkcevLKkomqbxyVxGKku',
+    'mainnet': 'n21eNjD9aXnBv4LPrVt6Rx1Kf61mPzqUrRe'
 };
 var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
 var RENDER_DURATION = 1000;
