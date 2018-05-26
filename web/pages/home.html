@@ -227,6 +227,48 @@
   </div>
 </div>
 
+<div class="modal fade" id="referralModal" tabindex="-1" role="dialog" aria-labelledby="referralModalLabel">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="referralModalLabel">推广代码</h4>
+      </div>
+      <div class="modal-body">
+          请将推广代码嵌入您的网站，经过推广代码进入<b><i>100x100</i></b>的用户可以给您的应用评价和打赏。
+        <div class="radio">
+          <label for="ref1">
+          <input type="radio" id="ref1" name="referral" onclick="selectReferral(this)"/>
+            <div>
+              请到<a target="_blank" href="{{url}}#?clickBlock={{showBlockId}}"><b><i>100x100</i></b></a>支持我们！
+            </div>
+          </label>
+        </div>
+        <div class="radio">
+          <label for="ref2">
+          <input type="radio" id="ref2" name="referral" onclick="selectReferral(this)"/>
+            <div>
+              <a target="_blank" href="{{url}}#?clickBlock={{showBlockId}}"><b><i>100x100</i></b></a>
+            </div>
+          </label>
+        </div>
+        <div class="radio">
+          <label for="ref3">
+          <input type="radio" id="ref3" name="referral" onclick="selectReferral(this)"/>
+            <div>
+              <a target="_blank" href="{{url}}#?clickBlock={{showBlockId}}"><img src="{{url}}/img/ref.png"/></a>
+            </div>
+          </label>
+        </div>
+        <textarea id="refcode" class="form-control" rows="3"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="card" class="thumbnail" style="position:absolute;width:260px">
   <div style="margin: 5px">
     <h3 ng-show="showingDistrict.config.title">{{showingDistrict.config.title}}</h3>
@@ -234,6 +276,7 @@
     <div>
       <div class="text-muted" ng-hide="rate > 0">评价过少暂无评分
         <a class="btn btn-default btn-xs" ng-click="startRating()">评价</a>
+        <a class="btn btn-default btn-xs" ng-click="referral()" ng-show="showingDistrict && isMyBlock(showingDistrictId)">推广代码</a>
       </div>
       <fieldset class="rating" ng-show="rate > 0" ng-click="startRating()">
         <input type="radio" name="rating" value="5" ng-model="rate" disabled="1"/><label class = "full" for="star5"></label>

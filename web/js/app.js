@@ -56,6 +56,9 @@ blocksApp.controller('homeController', function($scope, $http, $location, $timeo
     $scope.contractAddress = CONTRACT_ADDRESS[$scope.net];
     $scope.callUrl = 'https://' + $scope.net + '.nebulas.io/v1/user/call';
     $scope.clickBlock = $location.search().clickBlock;
+    $scope.url = 'http://' + $location.host();
+    console.log('location', $location);
+    if ($location.port != 80) $scope.url += ':' + $location.port();
 
     $scope.$on('$viewContentLoaded', function(){
         window.postMessage({
@@ -608,6 +611,7 @@ blocksApp.controller('homeController', function($scope, $http, $location, $timeo
     }
 
     $scope.showCard = function (blockId) {
+        $scope.showBlockId = blockId;
         $scope.showingDistrict = $scope.getDistrictOfBlock(blockId);
         if (!$scope.showingDistrict) return;
         var pos = blockPos(blockId);
@@ -676,6 +680,10 @@ blocksApp.controller('homeController', function($scope, $http, $location, $timeo
         var nebpay = new NebPay();
         nebpay.call($scope.contractAddress, value, method, JSON.stringify(args), { listener: txCallback(scope) });
 }
+
+    $scope.referral = function () {
+        $('#referralModal').modal();
+    }
 
 });
 
@@ -768,6 +776,12 @@ function loadImg(scope){
     };
 
     reader.readAsDataURL(file);
+}
+
+function selectReferral(e) {
+    var ref = e.getAttribute('id');
+    var refCode = $('label[for=' + ref + '] div');
+    $('#refcode').text(refCode.html().replace(/[\r\n]/g, '').trim());
 }
 
 $(window).scroll(function (e) {
