@@ -266,7 +266,9 @@ module.exports = (function () {
                 if (this.blocks.indexOf(subDist._id) == -1) {
                     // district has no blocks, remove the sub district
                     var mainDist = this.districts.get(account);
-                    this.subs.del(fromDistName);
+                    var subs = this.subs.get(fromDistName);
+                    delete(subs[toDistName]);
+                    this.subs.set(fromDistName, subs);
                     this.districts.set(account, mainDist);
                     this.districtIds.del(subDist._id);
                     this.districts.del(fromDistFullName);
@@ -425,7 +427,7 @@ module.exports = (function () {
     
         _transferBlocks: function (from, to, blocks, withSubs) {
             var allBlocks = this.blocks;
-            var fromDistrict = this.districts.get(from);
+            var fromDistrict = this._getOrCreateDistrict(from);
             var toDistrict = this._getOrCreateDistrict(to);
 
             var allowedDistricts = {};
