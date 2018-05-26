@@ -315,7 +315,9 @@ module.exports = (function () {
         },
 
         withdraw: function (amount) {
-            _transferNas(this.author, amount);
+            if (this.author === Blockchain.transaction.from) {
+                _transferNas(this.author, amount);
+            }
         },
 
         /*

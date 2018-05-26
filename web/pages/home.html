@@ -298,7 +298,7 @@
     <div ng-hide="loadingRatings" ng-repeat="rating in showingDistrict.ratings" style="margin:3px">
       <div style="float:right;color:{{rating.rating >= 4 ? 'green' : (rating.rating >= 3 ? 'orange' : 'red')}}"><small><b>{{rating.rating}}</b> 分</small></div>
       <div><small title="{{rating.account}}">来自: <b>{{short(rating.account)}}</b><small></div>
-      <div style="float:right" ng-show="rating.donate"><small title="已打赏 {{rating.donate}} NAS">已打赏<small></div>
+      <div style="float:right" ng-show="rating.donate"><small title="已打赏 {{rating.donate}} NAS">已打赏</small></div>
       <div ng-show="rating.comment">{{rating.comment}}</div>
       <div ng-hide="rating.comment" class="text-muted">无评论</div>
     </div>

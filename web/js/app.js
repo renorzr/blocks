@@ -7,7 +7,7 @@ var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
 var CONTRACT_ADDRESS = {
     'testnet': 'n21KiaS89x5wV2mtkcevLKkomqbxyVxGKku',
-    'mainnet': 'n21eNjD9aXnBv4LPrVt6Rx1Kf61mPzqUrRe'
+    'mainnet': 'n1f1hn3uVdod29Q2pLy4nW6SgVq5BRmXmzB'
 };
 var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
 var RENDER_DURATION = 1000;
