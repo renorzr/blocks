@@ -276,7 +276,7 @@
     <div>
       <div class="text-muted" ng-hide="rate > 0">评价过少暂无评分
         <a class="btn btn-default btn-xs" ng-click="startRating()">评价</a>
-        <a class="btn btn-default btn-xs" ng-click="referral()" ng-show="showingDistrict && isMyBlock(showingDistrictId)">推广代码</a>
+        <a class="btn btn-default btn-xs" ng-click="referral()" ng-show="showingDistrict && isMyBlock(showingDistrict._id)">推广代码</a>
       </div>
       <fieldset class="rating" ng-show="rate > 0" ng-click="startRating()">
         <input type="radio" name="rating" value="5" ng-model="rate" disabled="1"/><label class = "full" for="star5"></label>
