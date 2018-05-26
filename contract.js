@@ -11,17 +11,18 @@ module.exports = (function () {
             author: null,
             nextDistrictId: null,
             nextOrderId: null,
-            orders: null,
             blocks: null,
             lastPrice: null
         });
     
         LocalContractStorage.defineMapProperties(this, {
+            orders: null,       // orderId: {_id: 1, blocks: "AAA"}
             config: null,       // districtId: {img: ...}
             districts: null,    // districtId: {_id: districtId, _subs:{}} 
             districtIds: null,  // districtId: districtName
             subs: null,         // account: {subDistName: subDistId}
             districtRatings: null, // districtId: [{comment: '...', rating: 4, donate: 0.1}]
+            orderLocks: null,  // blockId: true
             orderBalances: {
                 stringify: function(value) {
                     return value.toString();
@@ -37,7 +38,6 @@ module.exports = (function () {
         init: function () {
             this.nextDistrictId = 0;
             this.nextOrderId = 0;
-            this.orders = {};
             this.author = Blockchain.transaction.from;
             var district = this._addDistrict(this.author);
             this.blocks = Array(TOTAL_BLOCKS).fill(district._id);
@@ -99,10 +99,8 @@ module.exports = (function () {
             if (direction === SELL) {
                 var district = this.districts.get(from);
                 var subs = this.subs.get(from);
-                var districtIds = [district._id];
-                for (var k in subs) {
-                    districtIds.push(subs[k]);
-                }
+                var districtIds = {};
+                districtIds[district._id] = true;
                 this._ensureBlocksInDistricts(districtIds, blocks);
                 return this._createOrder(order);
             } else if (direction === BUY) {
@@ -134,7 +132,8 @@ module.exports = (function () {
         cancel: function (orderId) {
             var from = Blockchain.transaction.from;
             var district = this.districts.get(from);
-            if (!(district && this.orders[orderId].creator === district._id)) {
+            var order = this.orders.get(orderId);
+            if (!(district && order && order.creator === district._id)) {
                 throw new Error('WRONG_ORDER_OWNERSHIP');
             }
             var balance = this.orderBalances.get(orderId);
@@ -142,9 +141,7 @@ module.exports = (function () {
                 _transferNas(from, balance);
             }
             this.orderBalances.del(orderId);
-            var orders = this.orders;
-            delete(orders[orderId]);
-            this.orders = orders;
+            this.orders.del(orderId);
         },
 
         /**
@@ -156,8 +153,9 @@ module.exports = (function () {
             limit = limit || 100;
             var result = [];
             while (id >= 0 && result.length < limit) {
-                var order = this.orders[id--];
+                var order = this.orders.get(id--);
                 if (order
+                    && (filter.creator == null || filter.creator === order.creator)
                     && (filter.direction == null || filter.direction === order.direction)
                     && (filter.price_gt == null || order.price > filter.price_gt)
                     && (filter.price_lt == null || order.price < filter.price_lt)
@@ -180,7 +178,7 @@ module.exports = (function () {
          * blocks: blocks to buy
          */
         trade: function (direction, orderId, blocks) {
-            var order = this.orders[orderId];
+            var order = this.orders.get(orderId);
             if (!(order && order.blocks && order.direction === direction)) {
                 throw new Error('ORDER_UNAVAILABLE');
             }
@@ -202,6 +200,8 @@ module.exports = (function () {
             // money to author
             _transferNas(this.author, fee);
 
+            this._removeOrderBlocks(order, blocks, true);
+            this.lastPrice = order.price;
             if (direction === BUY) {
                 // i'm selling because the order is BUY
 
@@ -220,10 +220,9 @@ module.exports = (function () {
 
                 // remove blocks from my sell order
                 var districtId = this.districts.get(from)._id;
-                var orders = this.orders;
-                for (var orderId in orders) {
-                    var order = orders[orderId];
-                    if (order.direction === SELL && order.creator === districtId) {
+                for (var i = 0; i < this.nextOrderId; i++) {
+                    var order = this.orders.get(i);
+                    if (order && order.direction === SELL && order.creator === districtId) {
                         this._removeOrderBlocks(order, blocks, false);
                         break;
                     }
@@ -246,8 +245,6 @@ module.exports = (function () {
                     throw new Error('INSUFFICIENT_MONEY');
                 }
             }
-            this.lastPrice = order.price;
-            this._removeOrderBlocks(order, blocks, true);
         },
     
         configure: function(sub, config) {
@@ -315,6 +312,10 @@ module.exports = (function () {
             return result;
         },
 
+        withdraw: function (amount) {
+            _transferNas(this.author, amount);
+        },
+
         /*
          * remove blocks from order
          */
@@ -329,31 +330,35 @@ module.exports = (function () {
                 if (blocksInOrderStatus[blockId]) {
                     blocksInOrderStatus[blockId] = false;
                 } else if (checkRange) {
-                    throw new Error('OUT_OF_RANGE:' + blockId);
+                    throw new Error('OUT_OF_ORDER:' + blockId + ':' + order._id);
                 }
             });
+
+            // unlock sold blocks in sell order
+            var _this = this;
+            if (order.direction === SELL) {
+                blocks.forEach(function(blockId){
+                    _this.orderLocks.del(blockId);
+                });
+            }
+
             blocksInOrder = blocksInOrder.filter(function(blockId){
                 return blocksInOrderStatus[blockId];
             });
-            var orders = this.orders;
             if (blocksInOrder.length > 0) {
                 order.blocks = stringifyBlocks(blocksInOrder);
-                orders[order._id] = order;
+                this.orders.set(order._id, order);
             } else {
-                delete(orders[order._id]);
+                this.orders.del(order._id);
             }
-            this.orders = orders;
         },
     
         _ensureBlocksInDistricts: function (districtIds, blocks) {
             var _this = this;
-            var districtIdMap = {};
-            districtIds.forEach(function (districtId) {
-                districtIdMap[districtId] = true;
-            });
+            var hit = false;
             blocks.forEach(function (blockId) {
-                if (!districtIdMap[_this.blocks[blockId]]) {
-                    throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
+                if (!districtIds[_this.blocks[blockId]]) {
+                    throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId + JSON.stringify(districtIds));
                 }
             });
         },
@@ -388,15 +393,19 @@ module.exports = (function () {
         },
 
         _createOrder: function (newOrder) {
-            var orders = this.orders;
+            var _this = this;
             // check duplication
-            ensureBlocksNotLockedByOrders(parseBlocks(newOrder.blocks), orders, function(order) {
-                return order.direction === newOrder.direction && order.creator === newOrder.creator;
-            });
-
+            if (newOrder.direction === SELL) {
+                parseBlocks(newOrder.blocks).forEach(function(blockId){
+                    if (_this.orderLocks.get(blockId)) {
+                        throw new Error('ORDER_LOCKED_BLOCK');
+                    } else {
+                        _this.orderLocks.set(blockId, true);
+                    }
+                });
+            }
             newOrder._id = this.nextOrderId++;
-            orders[newOrder._id] = newOrder;
-            this.orders = orders;
+            this.orders.set(newOrder._id, newOrder);
             return newOrder;
         },
     
@@ -428,11 +437,10 @@ module.exports = (function () {
                     allowedDistricts[distId] = true;
                 }
             }
+
+            this._ensureBlocksInDistricts(allowedDistricts, blocks);
     
             blocks.forEach(function (blockId) {
-                if (!allowedDistricts[allBlocks[blockId]]) {
-                    throw new Error('BLOCK_NOT_IN_DISTRICT:' + blockId);
-                }
                 allBlocks[blockId] = toDistrict._id;
             });
             this.blocks = allBlocks;
@@ -453,22 +461,5 @@ module.exports = (function () {
                 value: amount.toString()
             }
         });
-    }
-
-    function ensureBlocksNotLockedByOrders(blocks, orders, filter) {
-        var blockMap = {};
-        blocks.forEach(function(blockId){
-            blockMap[blockId] = true;
-        });
-        for (var orderId in orders) {
-            var order = orders[orderId];
-            if (filter(order)) {
-                parseBlocks(order.blocks).forEach(function (blockId) {
-                    if (blockMap[blockId]) {
-                        throw new Error('ORDER_LOCKED_BLOCK');
-                    }
-                });
-            }
-        };
     }
 })();

@@ -34,7 +34,7 @@
               </button>
               <ul class="dropdown-menu" style="text-align: left">
                   <li ng-repeat="(distId, distName) in districts" ng-hide="distId == currentDistrictId">
-                      <a href="#" ng-click="changeDistrict(distId)">{{distName || '<主区>'}}
+                      <a ng-click="changeDistrict(distId)">{{distName || '<主区>'}}
                   </a></li>
               </ul>
             </div>
@@ -44,8 +44,8 @@
                   分配选定的格子到其它区域<span class="caret"></span>
               </button>
               <ul class="dropdown-menu" style="text-align: left">
-                  <li ng-repeat="(distId, distName) in districts" ng-hide="distId == currentDistrictId"><a href="#" ng-click="transferBlocks(distName)">{{distName || '<主区>'}}</a></li>
-                  <li><a href="#" ng-click="transferBlocksToNewDistrict()">&lt;新建区域&gt;</a></li>
+                  <li ng-repeat="(distId, distName) in districts" ng-hide="distId == currentDistrictId"><a ng-click="transferBlocks(distName)">{{distName || '<主区>'}}</a></li>
+                  <li><a ng-click="transferBlocksToNewDistrict()">&lt;新建区域&gt;</a></li>
               </ul>
             </div>
             <button type="button" class="btn btn-default" ng-click="selectNone()" ng-show="transferringBlocks" ng-disabled="selectedBlocks.length == 0">取消选取</button>
@@ -88,7 +88,7 @@
               <td class="text-left">{{order.blocks.length}}</td>
               <td class="text-left">{{order.limit.join(' - ')}}</td>
               <td class="text-left">
-                <a title="查看" href="#" ng-show="account" ng-click="startTrade(order._id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
+                <a title="查看" ng-show="account" ng-click="startTrade(order._id)"><i class="fa fa-eye" aria-hidden="true"></i></a>
                 <i class="fa fa-user" title="我的交易单" ng-show="order.creator === mainDistrictId"></i>
               </td>
             </tr>
@@ -190,7 +190,10 @@
         <h4 class="modal-title" id="ratingModalLabel">评价 {{showingDistrict.config.title}}</h4>
       </div>
       <div class="modal-body">
-          <form>
+          <div ng-hide="account">
+              评价前请安装 <a target="_blank" href="https://github.com/ChengOrangeJu/WebExtensionWallet">WebExtensionWallet</a> 并导入星云钱包。
+          </div>
+          <form ng-show="account">
             <div class="form-group">
               <fieldset class="rating">
                 <input type="radio" id="star5" name="rating" value="5" ng-model="currentRate"/><label class = "full" for="star5"></label>
@@ -209,7 +212,7 @@
                 <textarea maxlength="200" class="form-control" ng-model="comment" rows="3" placeholder="评论"></textarea>
                 <div style="float:right">{{comment.length || 0}}/200</div>
             </div>
-            <div class="checkbox">
+            <div class="checkbox" ng-show="donateDistrictId == showingDistrict._id" title="打赏的 NAS 全部转给格子拥有者，无手续费" >
               <label>
                 <input class="span3" type="checkbox" ng-model="toDonate"> 打赏 0.1 NAS </input>
               </label>
@@ -230,7 +233,7 @@
     <h3 ng-hide="showingDistrict.config.title" class="text-muted">未命名</h3>
     <div>
       <div class="text-muted" ng-hide="rate > 0">评价过少暂无评分
-        <a href="#" class="btn btn-default btn-xs" ng-click="startRating()">评价</a>
+        <a class="btn btn-default btn-xs" ng-click="startRating()">评价</a>
       </div>
       <fieldset class="rating" ng-show="rate > 0" ng-click="startRating()">
         <input type="radio" name="rating" value="5" ng-model="rate" disabled="1"/><label class = "full" for="star5"></label>
@@ -259,7 +262,7 @@
   </div>
   <div style="text-align: center; margin: 8px">
     <a href="{{showingDistrict.config.href}}" target="_blank" class="btn btn-primary" role="button">前往</a>
-    <a href="#" class="btn btn-default" role="button" ng-click="closeCard()">关闭</a>
+    <a class="btn btn-default" role="button" ng-click="closeCard()">关闭</a>
   </div>
 </div>
 

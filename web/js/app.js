@@ -5,20 +5,22 @@ var MODE_SETUP = 2;
 var BK_SIZE = 10; // block size in pixels
 var CANVAS_SIZE = BK_SIZE * EDGE_BLOCK_NUM;
 var blocksApp = angular.module('blocksApp', ['ngRoute']);
-var CONTRACT_ADDRESS = 'n1zq8XuGi58fTaLxvgCmsvpGwRtVD21kE3x';
+var CONTRACT_ADDRESS = {
+    'testnet': 'n1v4WjwgDXNGLNGTjFWAB7rLvrWjM6P99jA'
+};
 var AUTHOR_ADDRESS = "n1drJMWfHCzLWR7wEbU9nVry1SGKUr4Gu9J";
-var RENDER_DURATION = 100;
+var RENDER_DURATION = 1000;
 var FEE_RATE = 0.03;
-var FEE_LEAST = 0.1;
+var FEE_LOWEST = 0.1;
 var NebPay = require("nebpay");
 
 
 blocksApp.config(function($routeProvider) {
     $routeProvider
 
-        .when('/about', {
-            templateUrl : 'pages/about.html',
-            controller  : 'aboutController'
+        .when('/faq', {
+            templateUrl : 'pages/faq.html',
+            controller  : 'faqController'
         })
 
         .when('/assets', {
@@ -35,7 +37,7 @@ blocksApp.config(function($routeProvider) {
 blocksApp.controller('mainController', function($scope) {
 });
 
-blocksApp.controller('homeController', function($scope, $http, $location) {
+blocksApp.controller('homeController', function($scope, $http, $location, $timeout) {
     $('#card').hide();
     window.scope = $scope;
     $scope.blockStatus = [];
@@ -51,7 +53,9 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     $scope.orderPrice = 0.1;
     $scope.changedSettings = {};
     $scope.net = $location.host().indexOf('testnet') != -1 ? 'testnet' : 'mainnet';
+    $scope.contractAddress = CONTRACT_ADDRESS[$scope.net];
     $scope.callUrl = 'https://' + $scope.net + '.nebulas.io/v1/user/call';
+    $scope.clickBlock = $location.search().clickBlock;
 
     $scope.$on('$viewContentLoaded', function(){
         window.postMessage({
@@ -63,7 +67,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
 
         $scope.canvasPos = getPos($scope.canvas);
 
-        $scope.call("get", function(data) {
+        $scope.callRead("get", function(data) {
             $scope.overallData = data;
             for (var districtId in data.districts) {
                 var district = data.districts[districtId];
@@ -92,12 +96,18 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
                             console.log('config', district);
                             loadDistrictImage(district);
                         } else {
-                            $scope.call("getConfig", district._id, function(data){
+                            $scope.callRead("getConfig", district._id, function(data){
                                 district.config = data || {};
                                 if (district.config.img) {
                                     loadDistrictImage(district);
                                 } else {
                                     district.loading = false;
+                                }
+                                if ($scope.clickBlock) {
+                                    $timeout(function(){
+                                        $scope.showCard($scope.clickBlock);
+                                        $scope.donateDistrictId = $scope.showingDistrict._id;
+                                    }, 100);
                                 }
                             });
                         }
@@ -107,17 +117,20 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
             render($scope.ctx, $scope.overallData);
         });
 
-        $scope.call("market", function(market){
+        $scope.callRead("market", function(market){
             $scope.orders = market.orders;
+            market.orders.forEach(function(order){
+                order.blocks = parseBlocks(order.blocks);
+            });
         });
     });
 
-    $scope.call = function (method) {
+    $scope.callRead = function (method) {
         var args = Array.prototype.slice.call(arguments, 1);
         var cb = args.pop();
         var request = {
             from: $scope.account || AUTHOR_ADDRESS,
-            to: CONTRACT_ADDRESS,
+            to: $scope.contractAddress,
             value: "0",
             nonce: 0,
             gasPrice: "1000000",
@@ -240,13 +253,17 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     }
 
     $scope.startTrade = function (orderId) {
-        console.log('start trade', orderId);
+        window.scrollTo.apply(window, $scope.canvasPos);
         $scope.resetTradeBlocks();
         $scope.mode = MODE_TRADE;
         $scope.tradingOrder = $scope.getOrderById(orderId);
         $scope.selectable = $scope.tradingOrder.creator != $scope.mainDistrictId;
-        parseBlocks($scope.tradingOrder.blocks).forEach(function(blockId){
-            $scope.blockStatus[blockId].selectable = true;
+        var sell = $scope.tradingOrder.direction;
+        $scope.tradingOrder.blocks.forEach(function(blockId){
+            var districtId = scope.overallData.blocks[blockId];
+            var isMine = $scope.isMyBlock(districtId);
+            $scope.blockStatus[blockId].selectable = (!sell && isMine) || sell;
+            $scope.blockStatus[blockId].highlight = true;
         });
         $scope.selectNone();
     }
@@ -285,7 +302,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
         }
         $('#tradeModal').modal();
         $scope.totalPrice = $scope.tradingOrder.price * $scope.selectedBlocks.length;
-        $scope.fee = Math.max($scope.totalPrice * FEE_RATE, FEE_LEAST);
+        $scope.fee = Math.max($scope.totalPrice * FEE_RATE, FEE_LOWEST);
         if ($scope.tradingOrder.direction === BUY) {
             $scope.pay = $scope.totalPrice - $scope.fee;
         } else {
@@ -317,11 +334,12 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
         var nebpay = new NebPay();
         var blocks = stringifyBlocks($scope.selectedBlocks);
         var pay = order.direction ? $scope.pay : 0;
-        var args = JSON.stringify([order.direction, order._id, blocks]);
-        nebpay.call(CONTRACT_ADDRESS, pay.toFixed(5), "trade", args, { listener: txCallback(scope) });
+        var args = JSON.stringify([]);
+        $scope.callContract(pay.toFixed(5), "trade", order.direction, order._id, blocks);
     }
 
     $scope.startOrder = function (direction) {
+        window.scrollTo.apply(window, $scope.canvasPos);
         $scope.resetTradeBlocks();
         $scope.orderDirection = direction;
         var sell = direction;
@@ -332,7 +350,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
         for (var blockId in blocks) {
             var districtId = blocks[blockId];
             var isMine = $scope.isMyBlock(districtId);
-            $scope.blockStatus[blockId].selectable = (sell && isMine) || (!sell && !isMine);
+            $scope.blockStatus[blockId].selectable = (sell && isMine && !$scope.orderLocks[blockId]) || (!sell && !isMine);
         };
         $scope.selectNone();
     }
@@ -346,9 +364,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     }
 
     $scope.cancelOrder = function () {
-        var nebpay = new NebPay();
-        var args = JSON.stringify([$scope.tradingOrder._id]);
-        nebpay.call(CONTRACT_ADDRESS, 0, "cancel", args, { listener: txCallback(scope) });
+        $scope.callContract(0, "cancel", $scope.tradingOrder._id);
     }
 
     getBlockByPos = function (x, y) {
@@ -414,15 +430,14 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
         var blocks = stringifyBlocks($scope.selectedBlocks);
         var limit = [$scope.minBlocks, $scope.maxBlocks];
         var value = $scope.orderDirection ? 0 : $scope.orderTotalPrice().toFixed(5);
-        callContract(value, "order", $scope.orderDirection, parseFloat($scope.orderPrice), blocks, limit);
+        $scope.callContract(value, "order", $scope.orderDirection, parseFloat($scope.orderPrice), blocks, limit);
     }
 
     $scope.onNebMessage = function (data) {
         if (data.account) {
             console.log('account', data.account);
             $scope.account = data.account;
-            $scope.call("mine", function(data) {
-                console.log('data=', data);
+            $scope.callRead("mine", function(data) {
                 $scope.currentDistrictId = $scope.mainDistrictId = data._id;
                 $scope.subs = data._subs;
                 $scope.districts = {};
@@ -431,6 +446,15 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
                     $scope.districts[data._subs[name]] = name;
                 }
                 $scope.mineLoaded = true;
+
+                $scope.orderLocks = {};
+                $scope.callRead("market", {direction: SELL, creator: data._id}, function (data) {
+                    data.orders.forEach(function (order) {
+                        parseBlocks(order.blocks).forEach(function(blockId) {
+                            $scope.orderLocks[blockId] = true;
+                        });
+                    });
+                });
             });
         }
         if(data.txhash) {
@@ -482,7 +506,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
 
     $scope.transferBlocks = function (districtName) {
         var blocks = stringifyBlocks($scope.selectedBlocks);
-        callContract(0, "transferBlocks",
+        $scope.callContract(0, "transferBlocks",
             $scope.districts[$scope.currentDistrictId], districtName, blocks);
     }
 
@@ -570,7 +594,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     }
 
     $scope.save = function () {
-        callContract(0, "configure", $scope.districts[$scope.currentDistrictId], $scope.changedSettings);
+        $scope.callContract(0, "configure", $scope.districts[$scope.currentDistrictId], $scope.changedSettings);
     }
 
     $scope.backupDistrict = function () {
@@ -586,7 +610,6 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     $scope.showCard = function (blockId) {
         $scope.showingDistrict = $scope.getDistrictOfBlock(blockId);
         if (!$scope.showingDistrict) return;
-        console.log('showing', $scope.showingDistrict);
         var pos = blockPos(blockId);
         var card = $('#card');
         var width = card.width();
@@ -605,7 +628,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
 
     $scope.loadRatings = function (districtId) {
         $scope.loadingRatings = true;
-        $scope.call("ratings", districtId, Date.now() - MONTH, function (ratings) {
+        $scope.callRead("ratings", districtId, Date.now() - MONTH, function (ratings) {
             var district = $scope.overallData.districts[districtId]
             district.ratings = ratings;
             var sum = 0;
@@ -630,7 +653,7 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     }
 
     $scope.rating = function () {
-        callContract(
+        $scope.callContract(
             $scope.toDonate ? 0.1 : 0,
             "rating",
             $scope.showingDistrict._id,
@@ -647,19 +670,17 @@ blocksApp.controller('homeController', function($scope, $http, $location) {
     $scope.short = function (account) {
         return account.substring(0, 4) + "..." + account.substring(account.length - 4);
     }
-});
 
-blocksApp.controller('aboutController', function($scope) {
-});
-
-blocksApp.controller('assetsController', function($scope) {
-});
-
-function callContract(value, method) {
-    var args = Array.prototype.slice.call(arguments, 2);
-    var nebpay = new NebPay();
-    nebpay.call(CONTRACT_ADDRESS, value, method, JSON.stringify(args), { listener: txCallback(scope) });
+    $scope.callContract = function (value, method) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var nebpay = new NebPay();
+        nebpay.call($scope.contractAddress, value, method, JSON.stringify(args), { listener: txCallback(scope) });
 }
+
+});
+
+blocksApp.controller('faqController', function($scope) {
+});
 
 function render(ctx, data) {
     for (var districtId in data.districts) {
@@ -728,7 +749,7 @@ function txCallback(scope) {
 }
 
 window.addEventListener('message', function(e) {
-    if (e.data.data) scope.onNebMessage(e.data.data);
+    if (e.data.data && scope) scope.onNebMessage(e.data.data);
 });
 
 function loadImg(scope){
@@ -751,6 +772,7 @@ function loadImg(scope){
 
 $(window).scroll(function (e) {
     var toolbar = $('#toolbar');
+    if (!toolbar[0]) return;
     var isPositionFixed = (toolbar.css('position') == 'fixed');
     var scrollBottom = $(this).scrollTop() + window.innerHeight;
     if (!isPositionFixed) {
