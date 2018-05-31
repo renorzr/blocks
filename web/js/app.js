@@ -751,9 +751,11 @@ function getPos(ele){
 function txCallback(scope) {
     return function (data) {
         console.log('tx callback', data);
-        $('.modal').modal('hide');
-        scope.$apply(function () {scope.txhash = data.txhash});
-        $('#txModal').modal();
+        if (data.txhash) {
+            $('.modal').modal('hide');
+            scope.$apply(function () {scope.txhash = data.txhash});
+            $('#txModal').modal();
+        }
     }
 }
 
